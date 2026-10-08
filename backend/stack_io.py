@@ -5,6 +5,7 @@ import json
 import re
 import struct
 from pathlib import Path
+from .paths import ROOT
 
 import numpy as np
 from PIL import Image, ImageOps
@@ -143,7 +144,7 @@ def read_frame(path):
                 with tifffile.TiffFile(path) as f:
                     camera = str(f.pages[0].tags[272].value)
                 if abs(np.linalg.det(matrix)) < 1e-8:
-                    calibration = json.loads((Path(__file__).resolve().parents[1]/'vendor/stack-camera-calibrations.json').read_text(encoding='utf-8'))['cameras'].get(camera)
+                    calibration = json.loads((ROOT/'vendor/stack-camera-calibrations.json').read_text(encoding='utf-8'))['cameras'].get(camera)
                     if calibration:
                         matrix = np.asarray(calibration['matrix'])
                         illuminant = calibration['illuminant']

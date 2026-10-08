@@ -71,7 +71,8 @@ def main():
     for folder in ('tools', 'artifacts', 'engines', 'licenses', 'vendor/starrem2k13/weights'):
         (stage / folder).mkdir(parents=True, exist_ok=True)
     (stage / 'artifacts/README.txt').write_text('Local logs and temporary image data. No autostart.\n')
-    for name in ('LICENSE', 'README.md', 'THIRD_PARTY.md', 'VALIDATION.md'):
+    shutil.copytree(ROOT / 'docs', stage / 'docs')
+    for name in ('LICENSE', 'README.md', 'THIRD_PARTY.md', 'VALIDATION.md', 'CHANGELOG.md'):
         shutil.copy2(ROOT / name, stage / name)
     shutil.copy2(ROOT / 'engines/README.md', stage / 'engines/README.md')
     for name in ('STARREM-LICENSE.txt', 'KINOBLOOM-LICENSE.txt', 'siril-ght.c', 'stack-camera-calibrations.json'):
@@ -80,6 +81,7 @@ def main():
     if hashlib.sha256(model.read_bytes()).hexdigest() != '878b2ac84efc36b8065023644ed8443110cfd31367919a17c8a7105a4f8d1d49':
         raise ValueError('The vendored model differs from the pinned upstream model.')
     shutil.copy2(model, stage / 'vendor/starrem2k13/weights/model.onnx')
+    shutil.copy2(ROOT / 'vendor/starrem2k13/LICENSE', stage / 'vendor/starrem2k13/LICENSE')
     compile_cs('BridgeLauncher.cs', stage / 'tools/StarStudioLauncher.exe')
 
     # Retain each installed runtime dependency's original license/notices, including
