@@ -1,0 +1,55 @@
+html { height:100%; }
+body { height:100%; box-sizing:border-box; background:#292929; color:#eee; font-size:12px; padding:12px; overflow:auto; }
+header { display:flex; flex-direction:column; align-items:stretch; padding-bottom:6px; border-bottom:1px solid #555; }
+header > * { width:100%; flex-shrink:0; }
+h2 { font-size:18px; margin:0 0 5px; } h3 { font-size:14px; margin:6px 0; }
+section { margin:8px 0; padding:10px; border:1px solid #505050; border-radius:6px; }
+.tabs { display:flex; margin:10px 0; }
+.tab { flex:1; height:34px; border-radius:0; }
+.tab.selected { background:#1768ac; border-color:#388bd3; }
+.page { display:none; } .page.active { display:flex; flex-direction:column; }
+.collapsed { display:none; } .collapsed.expanded { display:flex; flex-direction:column; padding:10px; border:1px solid #505050; }
+#modelSettings label { display:block; margin:8px 0 3px; }
+#executable { width:100%; }
+.disclosure { width:100%; height:32px; margin:14px 0 6px; text-align:left; }
+.execute { width:100%; height:36px; margin-top:12px; }
+.hint { color:#aaa; margin-top:8px; }
+.row { display:flex; align-items:center; margin:3px 0; min-height:0; }
+.row > * { margin-right:7px; } .row > sp-picker { flex:1; }
+button { border:1px solid #606060; background:#393939; color:#eee; padding:3px 8px; height:27px; min-height:0; margin:0; border-radius:4px; font-size:12px; }
+button.primary { background:#1768ac; border-color:#388bd3; }
+button:disabled { opacity:.45; }
+input[type=text] { flex:1; padding:5px; background:#222; color:#eee; border:1px solid #555; }
+input[type=number] { width:78px; background:#222; color:#eee; border:1px solid #555; padding:4px; }
+input[type=range] { width:100%; margin:2px 0 7px; }
+sp-picker { width:100%; height:30px; margin:0; }
+.columns { display:flex; } .column { flex:1; min-width:0; padding:7px; border:1px solid #555; margin:0 3px; }
+.column > button { margin:6px 0; width:100%; }
+.histogram { width:100%; height:70px; background:#090909; margin-top:4px; }
+.thumb { width:100%; height:140px; object-fit:contain; background:#111; cursor:crosshair; }
+.param { margin-top:3px; } .param .row { justify-content:space-between; margin:0; height:24px; }
+.param label { flex:1; } .param button { width:24px; min-width:24px; padding:2px; }
+.param input.numeric { width:70px; min-width:70px; flex:none; padding:2px; }
+.advanced { display:none; } .showAdvanced .advanced { display:block; }
+.mixPreview { width:100%; height:360px; object-fit:contain; background:#111; }
+.muted { color:#aaa; font-size:11px; }
+footer { padding:5px; } progress { width:100%; height:8px; }
+#status { margin:8px 0; white-space:pre-wrap; }
+.error { color:#ffa47a; }
+.stackSettings > div { flex:1; min-width:0; }
+.stackSettings label { display:block; margin:8px 0 4px; }
+#stackNames { max-height:65px; overflow:auto; white-space:pre-wrap; margin-top:5px; }
+#stackMaskEditor { position:relative; width:100%; height:320px; background:#111; margin-top:12px; }
+#stackMaskEditor img { position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain; }
+#stackMask { cursor:crosshair; }
+#stackBrush { flex:1; min-width:60px; margin:0; }
+#stackCache { margin-top:8px; }
+#stackExecute { flex:1; width:auto; }
+.processTool { border:1px solid #505050; border-radius:4px; margin-top:7px; }
+.processToolHeader { display:flex; align-items:center; padding:4px 7px; }
+.processToolHeader button { flex:1; border:0; text-align:left; background:transparent; }
+.processToolBody { display:none; padding:4px 10px 10px; }
+.processToolBody.expanded { display:flex; flex-direction:column; }
+.processToolBody .hint { margin-bottom:5px; }
+#processCurve { height:75px; width:100%; background:#111; }
+#processPage > .row { flex-shrink:0; }

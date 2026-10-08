@@ -1,0 +1,11 @@
+numpy==2.5.3
+onnxruntime==1.30.0
+Pillow==12.3.0
+tifffile==2026.9.20
+pytest==9.1.1
+astroalign==2.6.2
+rawpy==0.27.1
+opencv-python-headless==5.0.0.93
+sep==1.4.1
+scipy==1.18.1
+scikit-image==0.26.0

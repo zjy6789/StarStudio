@@ -1,0 +1,300 @@
+"""Authenticated loopback bridge for Photoshop UXP (no remote service)."""
+import argparse
+import io
+import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+import secrets
+import threading
+import time
+from urllib.parse import urlparse, parse_qs
+import uuid
+import numpy as np
+from PIL import Image
+from .algorithms import ROOT, validate_image, color_count, starnet, starrem, separate, stretch, combine
+
+
+def sequence(image, chain, current):
+    for p in chain:
+        image = stretch(image, p)
+    return stretch(image, current)
+
+
+class Store:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.images, self.jobs = {}, {}
+        self.worker = threading.Lock()
+        self.preview_key = None
+
+    def create(self, w, h, c):
+        if not (0 < w <= 65536 and 0 < h <= 65536 and w*h <= 250_000_000 and c in (1, 2, 3, 4)):
+            raise ValueError("无效图像尺寸")
+        key = uuid.uuid4().hex
+        a = np.lib.format.open_memmap(self.path / f"{key}.npy", mode="w+", dtype="<f4", shape=(h, w, c))
+        self.images[key] = {"data": a, "rows": 0, "ready": False}
+        return key
+
+    def get(self, key):
+        entry = self.images[key]
+        if not entry["ready"]:
+            raise ValueError("图像上传尚未完成")
+        return entry["data"]
+
+    def save(self, image):
+        h, w, c = image.shape
+        key = self.create(w, h, c)
+        self.images[key]["data"][:] = image
+        self.images[key]["data"].flush()
+        self.images[key].update(ready=True, rows=h)
+        return key
+
+    def preview(self, image):
+        key = self.preview_key
+        if key and self.images[key]["data"].shape == image.shape:
+            self.images[key]["data"][:] = image
+            self.images[key]["data"].flush()
+        else:
+            if key:
+                self.delete(key)
+            self.preview_key = key = self.save(image)
+        return key
+
+    def delete(self, key):
+        entry = self.images.pop(key)
+        entry["data"]._mmap.close()
+        (self.path / f"{key}.npy").unlink()
+
+    def job(self, request):
+        key = uuid.uuid4().hex
+        job = {"id": key, "state": "queued", "progress": 0}
+        self.jobs[key] = job
+
+        def run():
+            try:
+                with self.worker:
+                    job["state"] = "running"
+                    def progress(x):
+                        job["progress"] = round(float(x), 3)
+                    if request["op"] in ("stack", "stackInspect"):
+                        from .stacking import stack, inspect
+                        if request["op"] == "stackInspect":
+                            job["message"] = "读取基准帧预览…"
+                            job["result"] = inspect(request["paths"])
+                        else:
+                            def message(text):
+                                job["message"] = text
+                            job["result"] = stack(request,self.path,progress,message,lambda:job.get("cancel",False))
+                    elif request["op"] == "processStars":
+                        from .star_processing import process_stars, curve_values
+                        job["message"] = "正在加工星点…"
+                        output, details = process_stars(self.get(request["image"]), request["settings"],
+                                                       self.path, float(request.get("scale", 1)), progress)
+                        job["result"] = {"image": self.save(output), **details}
+                        if request.get("preview"):
+                            import base64
+                            rgb = output[..., :color_count(output)].copy()
+                            if output.shape[2] != rgb.shape[2]:
+                                rgb *= output[..., -1:]
+                            if rgb.shape[2] == 1:
+                                rgb = np.repeat(rgb, 3, axis=2)
+                            buffer = io.BytesIO()
+                            Image.fromarray(np.rint(rgb*255).astype(np.uint8)).save(buffer, format="PNG")
+                            job["result"]["preview"] = "data:image/png;base64,"+base64.b64encode(buffer.getvalue()).decode()
+                            job["result"]["curve"] = curve_values(np.linspace(0, 1, 256), request["settings"].get("curve", {})).tolist()
+                    elif request["op"] == "extract":
+                        original = self.get(request["image"])
+                        validate_image(original)
+                        colors = np.asarray(original[..., :color_count(original)])
+                        engine = request.get("engine", "starrem")
+                        if engine == "starnet":
+                            folder = self.path / key
+                            folder.mkdir()
+                            bg = starnet(colors, folder, request.get("executable", str(ROOT / "engines/starnet/starnet++.exe")),
+                                         int(request.get("stride", 256)), progress)
+                        elif engine == "starrem":
+                            bg = starrem(colors, progress)
+                        else:
+                            raise ValueError("未知分离引擎")
+                        bg, stars = separate(original, bg, request.get("mode", "screen"))
+                        job["result"] = {"background": self.save(bg), "stars": self.save(stars)}
+                    elif request["op"] == "mix":
+                        b = self.get(request["background"])
+                        s = self.get(request["stars"])
+                        if b.shape != s.shape:
+                            raise ValueError("图层尺寸或通道不一致")
+                        result = np.empty_like(b)
+                        for y in range(0, b.shape[0], 128):
+                            result[y:y+128] = combine(sequence(b[y:y+128], request.get("bchain", []), request["bp"]),
+                                                     sequence(s[y:y+128], request.get("schain", []), request["sp"]), request["mode"])
+                            progress(min(1, (y+128)/b.shape[0]))
+                        job["result"] = {"image": self.save(result)}
+                    else:
+                        raise ValueError("未知操作")
+                    job.update(state="done", progress=1)
+            except Exception as e:
+                job.update(state="error", error=str(e))
+        threading.Thread(target=run, daemon=True).start()
+        return key
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        # Do not log tokens, image bytes, or full query strings.
+        print(f"{self.command} {urlparse(self.path).path} {args[1] if len(args)>1 else ''}", flush=True)
+
+    def reply(self, data, status=200, kind="application/json"):
+        payload = json.dumps(data, ensure_ascii=False).encode("utf-8") if kind == "application/json" else data
+        self.send_response(status)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Star-Token")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.end_headers()
+
+    def do_GET(self):
+        self.handle_api()
+
+    def do_POST(self):
+        self.handle_api()
+
+    def do_DELETE(self):
+        self.handle_api()
+
+    def handle_api(self):
+        if not secrets.compare_digest(self.headers.get("X-Star-Token", ""), self.server.token):
+            self.reply({"error": "本地服务认证失败"}, 403)
+            return
+        try:
+            self.server.last_activity = time.monotonic()
+            store = self.server.store
+            path = urlparse(self.path)
+            parts = path.path.strip("/").split("/")
+            q = {k: v[0] for k, v in parse_qs(path.query).items()}
+            if self.command == "GET" and parts == ["health"]:
+                self.reply({"ok": True, "version": "0.5.0"})
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            if length < 0 or length > 64*1024*1024:
+                raise ValueError("请求过大，请分块上传")
+            body = self.rfile.read(length) if self.command == "POST" else b""
+            if self.command == "POST" and parts == ["images"]:
+                r = json.loads(body)
+                self.reply({"id": store.create(int(r["width"]), int(r["height"]), int(r["components"]))})
+            elif len(parts) == 2 and parts[0] == "images":
+                key = parts[1]
+                if self.command == "POST":
+                    entry = store.images[key]
+                    a = entry["data"]
+                    y, rows = int(q["y"]), int(q["rows"])
+                    if entry["ready"] or y != entry["rows"] or rows <= 0 or y+rows > a.shape[0]:
+                        raise ValueError("图像块必须按顺序完整上传")
+                    if len(body) != rows*a.shape[1]*a.shape[2]*4:
+                        raise ValueError("图像块字节数不符")
+                    block = np.frombuffer(body, dtype="<f4").reshape(rows, a.shape[1], a.shape[2])
+                    validate_image(block)
+                    a[y:y+rows] = block
+                    entry["rows"] += rows
+                    entry["ready"] = entry["rows"] == a.shape[0]
+                    if entry["ready"]:
+                        a.flush()
+                    self.reply({"ready": entry["ready"]})
+                elif self.command == "GET":
+                    a = store.get(key)
+                    y, rows = int(q.get("y", 0)), int(q.get("rows", 128))
+                    if y < 0 or rows <= 0 or y+rows > a.shape[0] or rows*a.shape[1]*a.shape[2]*4 > 64*1024*1024:
+                        raise ValueError("无效图像块范围")
+                    self.reply(a[y:y+rows].tobytes(), kind="application/octet-stream")
+                elif self.command == "DELETE":
+                    store.delete(key)
+                    self.reply({"ok": True})
+            elif self.command == "POST" and parts == ["jobs"]:
+                self.reply({"id": store.job(json.loads(body))})
+            elif len(parts) == 2 and parts[0] == "jobs" and self.command in ("GET", "DELETE"):
+                if self.command == "DELETE":
+                    store.jobs[parts[1]]["cancel"] = True
+                self.reply(store.jobs[parts[1]])
+            elif self.command == "POST" and parts == ["preview"]:
+                r = json.loads(body)
+                b, s = store.get(r["background"]), store.get(r["stars"])
+                step = max(1, int(np.ceil(max(b.shape[:2])/1600)))
+                b, s = sequence(b[::step, ::step], r.get("bchain", []), r["bp"]), sequence(s[::step, ::step], r.get("schain", []), r["sp"])
+                mix = combine(b, s, r["mode"])
+                def png(a):
+                    import base64
+                    rgb = a[..., :color_count(a)]
+                    if rgb.shape[2] == 1:
+                        rgb = np.repeat(rgb, 3, axis=2)
+                    f = io.BytesIO()
+                    Image.fromarray(np.rint(rgb*255).astype(np.uint8)).save(f, format="PNG")
+                    return "data:image/png;base64," + base64.b64encode(f.getvalue()).decode()
+                def hist(a):
+                    n = color_count(a)
+                    visible = a[..., n] > 0 if n != a.shape[2] else np.ones(a.shape[:2], dtype=bool)
+                    return [np.histogram(a[..., k][visible], bins=256, range=(0, 1))[0].tolist() for k in range(n)]
+                canvas = {"id":store.preview(mix), "width":mix.shape[1], "height":mix.shape[0], "components":mix.shape[2]} if r.get("canvas") else None
+                self.reply({"background": png(b), "stars": png(s), "mix": png(mix), "canvas":canvas,
+                            "bh": hist(b), "sh": hist(s),
+                            "bc": stretch_curve_list(r["bp"]), "sc": stretch_curve_list(r["sp"])})
+            elif self.command == "POST" and parts == ["sample"]:
+                r = json.loads(body)
+                a = store.get(r["image"])
+                x, y = int(float(r["u"])*a.shape[1]), int(float(r["v"])*a.shape[0])
+                if not (0 <= x < a.shape[1] and 0 <= y < a.shape[0]):
+                    raise ValueError("请在图像范围内取样")
+                a = sequence(a[max(0,y-1):y+2,max(0,x-1):x+2], r.get("chain", []), {})
+                n = color_count(a)
+                visible = a[..., n]>0 if n!=a.shape[2] else np.ones(a.shape[:2], dtype=bool)
+                if not visible.any():
+                    raise ValueError("取样位置是透明区域")
+                rgb = a[..., :n][visible].mean(axis=0)
+                lum = float(rgb[0] if n==1 else rgb @ np.array([.2126,.7152,.0722]))
+                self.reply({"value": lum})
+            else:
+                self.reply({"error": "路径不存在"}, 404)
+        except (ValueError, KeyError, TypeError, OSError) as e:
+            self.reply({"error": str(e)}, 400)
+        except Exception as e:
+            self.reply({"error": str(e)}, 500)
+
+
+def stretch_curve_list(p):
+    from .algorithms import stretch_curve
+    return stretch_curve(np.linspace(0, 1, 256), p).tolist()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--idle-seconds", type=float, default=90)
+    args = parser.parse_args()
+    config = json.loads((ROOT / "plugin/bridge.json").read_text(encoding="utf-8"))
+    folder = ROOT / "artifacts/jobs" / time.strftime("%Y%m%d-%H%M%S")
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server.token = config["token"]
+    server.store = Store(folder)
+    server.last_activity = time.monotonic()
+    def idle_exit():
+        while True:
+            time.sleep(min(5, args.idle_seconds))
+            working = any(j["state"] in ("running", "queued") for j in server.store.jobs.values())
+            if not working and time.monotonic()-server.last_activity > args.idle_seconds:
+                print("Panel disconnected; stopping idle component.", flush=True)
+                server.shutdown()
+                return
+    threading.Thread(target=idle_exit, daemon=True).start()
+    print(f"Star Layers bridge listening on 127.0.0.1:{args.port}", flush=True)
+    server.serve_forever()
+    server.server_close()
+
+
+if __name__ == "__main__":
+    main()

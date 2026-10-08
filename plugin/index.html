@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><div id="documentName" class="muted">未打开照片</div><div id="status">正在准备…</div><progress id="progress" max="1" value="0"></progress></header>
+<div class="tabs" role="tablist"><button id="stackTab" class="tab selected" role="tab" aria-selected="true">堆栈</button><button id="separateTab" class="tab" role="tab" aria-selected="false">星点分离</button><button id="processTab" class="tab" role="tab" aria-selected="false">星点加工</button><button id="recombineTab" class="tab" role="tab" aria-selected="false">星点重混合</button></div>
+<section id="separatePage" class="page" role="tabpanel">
+  <label>源图层</label><sp-picker id="source" placeholder="选择源图层"><sp-menu></sp-menu></sp-picker>
+  <div class="hint">默认使用当前图层，分离后保留原图层。</div>
+  <button id="modelOptions" class="disclosure">星点提取模型：Starrem2k13 ▾</button>
+  <div id="modelSettings" class="collapsed">
+    <label>提取模型</label><sp-picker id="engine"><sp-menu><sp-menu-item>StarNet v2（本机）</sp-menu-item><sp-menu-item>Starrem2k13（MIT 开源）</sp-menu-item></sp-menu></sp-picker>
+    <div id="starnetSettings"><label>StarNet 程序位置</label><input id="executable" type="text" placeholder="选择或填写 starnet++.exe 路径"><label>处理步长</label><sp-picker id="stride"><sp-menu><sp-menu-item>256（较快）</sp-menu-item><sp-menu-item>128</sp-menu-item><sp-menu-item>64（较慢）</sp-menu-item></sp-menu></sp-picker></div>
+    <label>星点分离方式</label><sp-picker id="decomposition"><sp-menu><sp-menu-item>滤色星点（Screen）</sp-menu-item><sp-menu-item>相加星点（差值）</sp-menu-item></sp-menu></sp-picker>
+  </div>
+  <button id="extract" class="primary execute">执行星点分离</button>
+</section>
+<section id="recombinePage" class="page" role="tabpanel">
+  <div class="columns">
+    <div class="column" id="backgroundControls"><h3>背景</h3><sp-picker id="background" placeholder="选择背景图层"><sp-menu></sp-menu></sp-picker><button id="useBackground">用当前图层</button><img class="histogram" id="bh"><img class="thumb" id="backgroundPreview"><div id="bpControls"></div><div class="row"><button id="resetBackground">重置</button><button id="applyBackground">应用拉伸</button></div></div>
+    <div class="column" id="starsControls"><h3>星点</h3><sp-picker id="stars" placeholder="选择星点图层"><sp-menu></sp-menu></sp-picker><button id="useStars">用当前图层</button><img class="histogram" id="sh"><img class="thumb" id="starsPreview"><div id="spControls"></div><div class="row"><button id="resetStars">重置</button><button id="applyStars">应用拉伸</button></div></div>
+  </div>
+  <div class="row"><label><input id="log" type="checkbox"> 对数直方图</label><button id="advanced">高级选项</button><sp-picker id="mode"><sp-menu><sp-menu-item>滤色 Screen</sp-menu-item><sp-menu-item>相加 Add</sp-menu-item></sp-menu></sp-picker></div>
+  <div class="row advanced"><button id="load">重新读取图层</button><button id="preview">更新预览</button></div>
+  <div class="row"><button id="canvas">在 Photoshop 中预览</button><span class="muted">快速预览；最终结果使用原尺寸</span></div>
+  <img id="mixPreview" class="mixPreview">
+  <button id="mix" class="primary execute">执行重混合</button>
+</section>
+<section id="processPage" class="page" role="tabpanel">
+  <div class="row"><sp-picker id="processSource" placeholder="选择星点图层"><sp-menu></sp-menu></sp-picker><button id="processUseActive">用当前图层</button></div>
+  <div class="hint">请选择分离后的星点图层。保留源图层，加工后创建新图层，再到重混合页使用。</div>
+  <div id="processTools"></div>
+  <div class="row"><button id="processReset">重置参数</button><button id="processPreviewButton">更新预览</button><label><input id="processOriginal" type="checkbox"> 查看原图</label><button id="processCanvas">在 Photoshop 中预览</button></div>
+  <img id="processPreview" class="mixPreview">
+  <div id="processPreviewHint" class="muted">快速预览最长边 1600 像素；半径按原图像素设置。缩星与星形重建请以原尺寸结果为准。</div>
+  <button id="processExecute" class="primary execute">执行星点加工</button>
+</section>
+<section id="stackPage" class="page active" role="tabpanel">
+  <div class="row"><button id="stackFiles">选择照片…</button><button id="stackFolder">选择文件夹…</button></div>
+  <div id="stackSummary" class="hint">支持 RAW、TIFF、PNG、JPEG；无需打开原始素材。</div>
+  <div id="stackNames" class="muted"></div>
+  <div class="row stackSettings"><div><label>堆栈模式</label><sp-picker id="stackMode"><sp-menu><sp-menu-item>均值（降噪推荐）</sp-menu-item><sp-menu-item>中位数</sp-menu-item><sp-menu-item>Sigma 裁剪均值</sp-menu-item><sp-menu-item>最大值</sp-menu-item><sp-menu-item>最小值</sp-menu-item></sp-menu></sp-picker></div><div><label>对齐场景</label><sp-picker id="stackScene"><sp-menu><sp-menu-item>纯星空</sp-menu-item><sp-menu-item>星空与固定地景</sp-menu-item></sp-menu></sp-picker></div></div>
+  <div id="stackMaskEditor"><img id="stackReference"><img id="stackMask"></div>
+  <div class="row"><label><input type="checkbox" id="stackPaint"> 画笔排除对齐区域</label><span>笔刷</span><input id="stackBrush" type="range" min="10" max="160" value="60"><button id="stackClearMask">清除蒙版</button></div>
+  <div class="hint">红色蒙版仅排除对齐特征，不删除像素。地景仍参与堆栈，可能拖花。</div>
+  <div class="row stackSettings"><div><label>保存格式</label><sp-picker id="stackFormat"><sp-menu><sp-menu-item>DNG（32 位线性浮点）</sp-menu-item><sp-menu-item>16 位 TIFF</sp-menu-item><sp-menu-item>32 位浮点 TIFF</sp-menu-item></sp-menu></sp-picker></div></div>
+  <div id="stackFormatHint" class="hint">DNG 文件保留 32 位浮点，PS 打开位深取决于 Camera Raw。要直接以 32 位继续处理，请选 32 位 TIFF；16 位 TIFF 会量化，负值截为 0。</div>
+  <div id="stackCache" class="muted"></div>
+  <div class="row"><button id="stackExecute" class="primary execute">执行堆栈并保存…</button><button id="stackCancel" disabled>取消</button></div>
+</section>
+<script src="main.js"></script>
+</body></html>
