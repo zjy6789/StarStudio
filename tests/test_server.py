@@ -14,6 +14,37 @@ from backend.server import Store, Handler
 from backend.algorithms import combine
 
 
+def test_extract_defaults_to_external_starnet(tmp_path, monkeypatch):
+    calls = []
+    def engine(colors, folder, executable, stride, progress):
+        calls.append((folder, executable, stride))
+        progress(1)
+        return colors * .8
+    monkeypatch.setattr('backend.server.starnet', engine)
+    store = Store(tmp_path)
+    image = np.full((8, 12, 4), .4, dtype=np.float32)
+    image[..., 3] = .7
+    key = store.save(image)
+    request = dict(op='extract', image=key, executable='test-starnet.exe', stride=128)
+    job_id = store.job(request)
+    deadline = time.monotonic() + 5
+    while store.jobs[job_id]['state'] in ('queued', 'running') and time.monotonic() < deadline:
+        time.sleep(.01)
+    job = store.jobs[job_id]
+    assert job['state'] == 'done', job
+    assert calls == [(tmp_path / job_id, 'test-starnet.exe', 128)]
+    b, s = [store.get(job['result'][name]) for name in ('background', 'stars')]
+    np.testing.assert_allclose(combine(b, s), image, atol=1e-7)
+    np.testing.assert_array_equal(b[..., 3], image[..., 3])
+    obsolete = store.job(dict(request, engine='unsupported'))
+    deadline = time.monotonic() + 5
+    while store.jobs[obsolete]['state'] in ('queued', 'running') and time.monotonic() < deadline:
+        time.sleep(.01)
+    assert store.jobs[obsolete]['state'] == 'error'
+    assert 'StarNet++' in store.jobs[obsolete]['error']
+    assert len(calls) == 1
+
+
 def test_canvas_preview_reuses_storage_and_replaces_changed_size(tmp_path):
     store = Store(tmp_path)
     image = np.full((12, 20, 4), .125, dtype=np.float32)

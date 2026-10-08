@@ -11,7 +11,7 @@ from urllib.parse import urlparse, parse_qs
 import uuid
 import numpy as np
 from PIL import Image
-from .algorithms import ROOT, validate_image, color_count, starnet, starrem, separate, stretch, combine
+from .algorithms import ROOT, validate_image, color_count, starnet, separate, stretch, combine
 
 
 def sequence(image, chain, current):
@@ -107,16 +107,12 @@ class Store:
                         original = self.get(request["image"])
                         validate_image(original)
                         colors = np.asarray(original[..., :color_count(original)])
-                        engine = request.get("engine", "starrem")
-                        if engine == "starnet":
-                            folder = self.path / key
-                            folder.mkdir()
-                            bg = starnet(colors, folder, request.get("executable", str(ROOT / "engines/starnet/starnet++.exe")),
-                                         int(request.get("stride", 256)), progress)
-                        elif engine == "starrem":
-                            bg = starrem(colors, progress)
-                        else:
-                            raise ValueError("未知分离引擎")
+                        if request.get("engine", "starnet") != "starnet":
+                            raise ValueError("星点分离仅支持 StarNet++；请在星点提取模型中配置程序位置。")
+                        folder = self.path / key
+                        folder.mkdir()
+                        bg = starnet(colors, folder, request.get("executable", str(ROOT / "engines/starnet/starnet++.exe")),
+                                     int(request.get("stride", 256)), progress)
                         bg, stars = separate(original, bg, request.get("mode", "screen"))
                         job["result"] = {"background": self.save(bg), "stars": self.save(stars)}
                     elif request["op"] == "mix":
@@ -180,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
             parts = path.path.strip("/").split("/")
             q = {k: v[0] for k, v in parse_qs(path.query).items()}
             if self.command == "GET" and parts == ["health"]:
-                self.reply({"ok": True, "version": "0.5.0"})
+                self.reply({"ok": True, "version": "0.5.1"})
                 return
             length = int(self.headers.get("Content-Length", 0))
             if length < 0 or length > 64*1024*1024:

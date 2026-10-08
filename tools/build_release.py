@@ -40,7 +40,7 @@ def archive(source, target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--tag', default='v0.5.0-beta.1')
+    parser.add_argument('--tag', default='v0.5.1-beta.1')
     parser.add_argument('--skip-freeze', action='store_true', help='Reuse an existing frozen runtime')
     args = parser.parse_args()
     if sys.platform != 'win32':
@@ -55,7 +55,7 @@ def main():
                         '--onedir', '--windowed', '--name', 'StarStudioBridge',
                         '--paths', str(ROOT), '--distpath', str(BUILD / 'frozen'),
                         '--workpath', str(BUILD / 'pyinstaller'), '--specpath', str(BUILD),
-                        '--collect-all', 'onnxruntime', '--collect-all', 'rawpy',
+                        '--collect-all', 'rawpy',
                         '--exclude-module', 'pytest', '--exclude-module', 'pip',
                         '--exclude-module', 'tkinter', '--exclude-module', 'matplotlib',
                         str(ROOT / 'tools/bridge_entry.py')], check=True, cwd=ROOT)
@@ -68,20 +68,15 @@ def main():
     stage.mkdir()
     shutil.copytree(BUILD / 'frozen/StarStudioBridge', stage / 'runtime')
     shutil.copytree(ROOT / 'plugin', stage / 'plugin', ignore=shutil.ignore_patterns('bridge.json'))
-    for folder in ('tools', 'artifacts', 'engines', 'licenses', 'vendor/starrem2k13/weights'):
+    for folder in ('tools', 'artifacts', 'engines', 'licenses', 'vendor'):
         (stage / folder).mkdir(parents=True, exist_ok=True)
     (stage / 'artifacts/README.txt').write_text('Local logs and temporary image data. No autostart.\n')
     shutil.copytree(ROOT / 'docs', stage / 'docs')
     for name in ('LICENSE', 'README.md', 'THIRD_PARTY.md', 'VALIDATION.md', 'CHANGELOG.md'):
         shutil.copy2(ROOT / name, stage / name)
     shutil.copy2(ROOT / 'engines/README.md', stage / 'engines/README.md')
-    for name in ('STARREM-LICENSE.txt', 'KINOBLOOM-LICENSE.txt', 'siril-ght.c', 'stack-camera-calibrations.json'):
+    for name in ('KINOBLOOM-LICENSE.txt', 'siril-ght.c', 'stack-camera-calibrations.json'):
         shutil.copy2(ROOT / 'vendor' / name, stage / 'vendor' / name)
-    model = ROOT / 'vendor/starrem2k13/weights/model.onnx'
-    if hashlib.sha256(model.read_bytes()).hexdigest() != '878b2ac84efc36b8065023644ed8443110cfd31367919a17c8a7105a4f8d1d49':
-        raise ValueError('The vendored model differs from the pinned upstream model.')
-    shutil.copy2(model, stage / 'vendor/starrem2k13/weights/model.onnx')
-    shutil.copy2(ROOT / 'vendor/starrem2k13/LICENSE', stage / 'vendor/starrem2k13/LICENSE')
     compile_cs('BridgeLauncher.cs', stage / 'tools/StarStudioLauncher.exe')
 
     # Retain each installed runtime dependency's original license/notices, including

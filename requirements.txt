@@ -1,5 +1,4 @@
 numpy==2.5.3
-onnxruntime==1.30.0
 Pillow==12.3.0
 tifffile==2026.9.20
 pytest==9.1.1

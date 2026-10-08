@@ -143,10 +143,6 @@ function showPage(page) {
   if(page==='stack') status('选择一批照片或文件夹；无需在 Photoshop 中打开素材。');
   if(page==='process') status('选择星点图层，启用需要的功能并展开参数。');
 }
-function modelSummary() {
-  $('modelOptions').textContent='星点提取模型：'+(value('engine')===1?'Starrem2k13':'StarNet v2')+' ▾';
-  $('starnetSettings').style.display=value('engine')===1?'none':'block';
-}
 async function restoreModelSettings() {
   const folder=await require('uxp').storage.localFileSystem.getDataFolder();
   settingsFile=(await folder.getEntries()).find(x=>x.name==='model-settings.json');
@@ -155,17 +151,16 @@ async function restoreModelSettings() {
     if(content) {
       const settings=JSON.parse(content);
       $('executable').value=settings.executable;
-      for(const id of ['engine','stride','decomposition']) $(id).selectedIndex=settings[id];
+      for(const id of ['stride','decomposition']) $(id).selectedIndex=settings[id];
     } else await saveModelSettings();
   } else {
     settingsFile=await folder.createFile('model-settings.json');
     await saveModelSettings();
   }
-  modelSummary();
 }
 function saveModelSettings() {
   const settings={executable:$('executable').value};
-  for(const id of ['engine','stride','decomposition']) settings[id]=value(id);
+  for(const id of ['stride','decomposition']) settings[id]=value(id);
   settingsWrite=settingsWrite.then(()=>settingsFile.write(JSON.stringify(settings))).catch(e=>status('模型设置保存失败：'+e.message,true));
   return settingsWrite;
 }
@@ -285,10 +280,11 @@ async function applySide(side) {
   reset(side); await preview();
 }
 async function extract() {
+  if(!$('executable').value.trim()) throw new Error('请先展开「星点提取模型」，填写 StarNet++ 程序路径。下载与安装步骤见 README。');
   const {doc,layer}=selectedLayer('source');
   const meta=await host.core.executeAsModal(()=>host.upload(doc,layer,api,report),{commandName:'读取源图层'});
   const mode=value('decomposition')===1?'add':'screen';
-  const result=await job({op:'extract',image:meta.id,engine:value('engine')===1?'starrem':'starnet',executable:$('executable').value,stride:[256,128,64][value('stride')],mode});
+  const result=await job({op:'extract',image:meta.id,executable:$('executable').value.trim(),stride:[256,128,64][value('stride')],mode});
   let bg,stars;
   await host.transaction(doc,'星点分离',async context=>{
     bg=await host.write(doc,result.background,meta,layer.name+'_starless',api,report,context);
@@ -317,13 +313,11 @@ async function mix() {
   refresh(); documentSnapshot=snapshot(); status('已创建新的重混合结果图层。');
 }
 buildControls('bp'); buildControls('sp');
-for (const id of ['engine','decomposition','stride','mode']) $(id).selectedIndex=0;
-$('engine').selectedIndex=1;
+for (const id of ['decomposition','stride','mode']) $(id).selectedIndex=0;
 $('executable').value=config.starnet || '';
 for (const page of ['stack','separate','process','recombine']) $(page+'Tab').addEventListener('click',()=>showPage(page));
 $('modelOptions').addEventListener('click',()=>$('modelSettings').classList.toggle('expanded'));
-$('engine').addEventListener('change',modelSummary);
-for(const id of ['engine','stride','decomposition','executable']) $(id).addEventListener('change',()=>{if(settingsFile) saveModelSettings();});
+for(const id of ['stride','decomposition','executable']) $(id).addEventListener('change',()=>{if(settingsFile) saveModelSettings();});
 for (const [id,picker] of [['useBackground','background'],['useStars','stars']]) $(id).addEventListener('click',()=>run(async()=>{
   useActive(picker); if(pairValid()) await preview(); else status('请选择背景和星点两个不同的图层。');
 }));
@@ -366,7 +360,7 @@ for (const [side,id] of [['bp','backgroundPreview'],['sp','starsPreview']]) $(id
 $('log').addEventListener('change',()=>{if(lastPreview){histogram('bh',lastPreview.bh,lastPreview.bc);histogram('sh',lastPreview.sh,lastPreview.sc);}});
 stackUI=require('./stack.js').setup({run,api,job,status});
 processUI=require('./star-processing.js').setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,currentPage:()=>currentPage});
-modelSummary(); syncLayers();
+syncLayers();
 setInterval(syncLayers,800);
 document.addEventListener('uxpcommand',event=>{
   if(event.commandId==='uxpshowpanel') {panelVisible=true;syncLayers();run(async()=>{});}

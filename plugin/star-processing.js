@@ -34,7 +34,7 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
   function reset() {
     for(const [name,,,specs] of tools) {
       $(name+'Enabled').checked=false;
-      for(const [key,,,,defaultValue] of specs) for(const suffix of ['', '_range']) $('process_'+name+'_'+key+suffix).value=defaultValue;
+      for(const [key,,,,,defaultValue] of specs) for(const suffix of ['', '_range']) $('process_'+name+'_'+key+suffix).value=defaultValue;
     }
     curvePlot([0,1]);$('processOriginal').checked=false;schedule();
   }

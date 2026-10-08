@@ -8,15 +8,7 @@ Star Studio 自有代码按 GPL-3.0-or-later 发布，完整许可在根目录 L
 - `vendor/siril-ght.c` 保留原始版权及 GPL-3.0-or-later 声明。`backend/algorithms.py` 改写其 GHS / modified arcsinh 分段数学，保留参数、端点归一化与拉伸后黑点位移；不声称完整复制 Siril 的颜色模型。
 - 彗差减少调用用户另装的 Siril 1.4.x CLI。源码和 Release 不包含 Siril 二进制。
 
-## Starrem2k13 — MIT
-
-- [code2k13/starrem2k13](https://github.com/code2k13/starrem2k13)，Copyright (c) 2021 code2k13。
-- 默认分离引擎，ONNX 模型随源码和 Release 分发。许可在 `vendor/STARREM-LICENSE.txt` 及 `vendor/starrem2k13/LICENSE`。
-- 上游 revision：`b6351c3c9b81411682bed246538e17464724e0df`。
-- 模型 SHA256：`878b2ac84efc36b8065023644ed8443110cfd31367919a17c8a7105a4f8d1d49`。
-- `backend/algorithms.py` 适配浮点输入、反射上下文及重叠块中心裁切；上游模型定义和推理源文件保留于 vendor。
-
-## StarNet v2 — 外部可选程序
+## StarNet v2 — 星点分离的外部程序
 
 - [官网与最新版 CLI](https://starnetastro.com/cli-tools/)。旧版适配器对应 v2.0.2 的 `starnet++.exe` 接口，新版接口不一定兼容。
 - 本项目不包含 StarNet 程序、权重、测试样片或源码。许可证由用户获取的官方发行包提供。
@@ -44,10 +36,9 @@ DNG 写出遵循 [Adobe DNG 规范](https://helpx.adobe.com/camera-raw/desktop/d
 
 ## Windows Release 的运行环境
 
-安装包包含 Python 3.12、ONNX Runtime（MIT）、NumPy（BSD）、Pillow（HPND）、tifffile（BSD）及上表运行库与必要依赖。精确版本见安装目录 `licenses/components.json`；各 wheel 原始 LICENSE、NOTICE 及底层库声明保存在 `licenses/`。
+安装包包含 Python 3.12、NumPy（BSD）、Pillow（HPND）、tifffile（BSD）及上表运行库与必要依赖。精确版本见安装目录 `licenses/components.json`；各 wheel 原始 LICENSE、NOTICE 及底层库声明保存在 `licenses/`。
 
 - [Python](https://www.python.org/)：PSF License，原许可随包。
-- [ONNX Runtime](https://github.com/microsoft/onnxruntime)：MIT。
 - [PyInstaller](https://github.com/pyinstaller/pyinstaller)：GPL-2.0-or-later with bootloader exception，例外允许冻结应用分发，原许可随包。
 - 同一 Release 的 `third-party-sources.zip` 提供实际版本 SEP、rawpy、LibRaw 对应源码、构建文件、来源及 SHA256。项目自有完整源码和 `tools/build_release.py` 在对应 Git 标签中提供，可按许可修改、重建及替换这些库；本项目不禁止为调试 LGPL 修改而逆向工程。
 - 数学库、图片编解码器及解释器底层库的许可由各原始发行包的 notices 保留；并非全部只受 Python 包主许可证覆盖。

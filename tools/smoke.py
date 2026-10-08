@@ -14,7 +14,7 @@ from backend.algorithms import combine
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--sample', type=Path, required=True, help='Your RGB 16-bit TIFF sample (not distributed)')
-parser.add_argument('--starnet', type=Path, help='Optional v2.0.2 starnet++.exe; otherwise test only Starrem')
+parser.add_argument('--starnet', type=Path, required=True, help='Legacy v2 starnet++.exe with its complete engine directory')
 args=parser.parse_args()
 config=json.loads((root/'plugin/bridge.json').read_text())
 def api(path, body=None, binary=False):
@@ -50,7 +50,7 @@ for y in range(0,h,128):
     api(f'/images/{key}?y={y}&rows={rows}',a[y:y+rows].tobytes(),True)
 save('PS-test-input',a)
 metrics={}
-for engine in (['starnet','starrem'] if args.starnet else ['starrem']):
+for engine in ['starnet']:
     start=time.monotonic()
     output=job(dict(op='extract',image=key,engine=engine,mode='screen',executable=str(args.starnet)))
     b,s=download(output['background'],a.shape),download(output['stars'],a.shape)

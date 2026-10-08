@@ -31,8 +31,7 @@ DNG 技术声明：This product includes DNG technology under license by Adobe.
 
 ## 提取引擎与分离方式
 
-- **StarNet v2（可选 CLI）**：调用已有 CLI，使用 16 位 TIFF 中转，工作目录设为安装目录以找到权重及 DLL。插件包不包含 StarNet 程序、权重或源代码。步长 256 / 128 / 64，较小步长通常更慢。
-- **Starrem2k13（MIT 开源）**：复用 [code2k13/starrem2k13](https://github.com/code2k13/starrem2k13) 的 ONNX 模型。适配器保持浮点精度，使用反射上下文并裁取重叠分块中心，避免原实现中的 8 位往返及边框。该模型训练样本较少，质量应按照片评估。
+- **StarNet++（外部 CLI）**：星点分离需要用户单独安装旧版 Windows v2 CLI，完整安装步骤见 [README](../README.md#安装-starnet-星点分离引擎)。使用 16 位 TIFF 中转，工作目录设为引擎安装目录以找到权重及 DLL。插件包不包含 StarNet 程序、权重或源代码。步长 256 / 128 / 64，较小步长通常更慢。
 - **滤色星点**：`S=(I-B)/(1-B)`，对应重混合 `I=B+S-B*S`。
 - **相加星点**：`S=I-B`，对应重混合 `I=clip(B+S)`。分离和重混合方式须匹配。
 

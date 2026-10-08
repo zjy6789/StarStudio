@@ -6,10 +6,11 @@
 <section id="separatePage" class="page" role="tabpanel">
   <label>源图层</label><sp-picker id="source" placeholder="选择源图层"><sp-menu></sp-menu></sp-picker>
   <div class="hint">默认使用当前图层，分离后保留原图层。</div>
-  <button id="modelOptions" class="disclosure">星点提取模型：Starrem2k13 ▾</button>
+  <button id="modelOptions" class="disclosure">星点提取模型：StarNet++ ▾</button>
   <div id="modelSettings" class="collapsed">
-    <label>提取模型</label><sp-picker id="engine"><sp-menu><sp-menu-item>StarNet v2（本机）</sp-menu-item><sp-menu-item>Starrem2k13（MIT 开源）</sp-menu-item></sp-menu></sp-picker>
-    <div id="starnetSettings"><label>StarNet 程序位置</label><input id="executable" type="text" placeholder="选择或填写 starnet++.exe 路径"><label>处理步长</label><sp-picker id="stride"><sp-menu><sp-menu-item>256（较快）</sp-menu-item><sp-menu-item>128</sp-menu-item><sp-menu-item>64（较慢）</sp-menu-item></sp-menu></sp-picker></div>
+    <label>StarNet++ 程序位置</label><input id="executable" type="text" placeholder="填写完整的 starnet++.exe 路径">
+    <div class="hint">首次使用需从 StarNet 官网下载 Windows CLI，将程序、权重和 DLL 完整解压后填写此路径。安装步骤见项目 README。</div>
+    <label>处理步长</label><sp-picker id="stride"><sp-menu><sp-menu-item>256（较快）</sp-menu-item><sp-menu-item>128</sp-menu-item><sp-menu-item>64（较慢）</sp-menu-item></sp-menu></sp-picker>
     <label>星点分离方式</label><sp-picker id="decomposition"><sp-menu><sp-menu-item>滤色星点（Screen）</sp-menu-item><sp-menu-item>相加星点（差值）</sp-menu-item></sp-menu></sp-picker>
   </div>
   <button id="extract" class="primary execute">执行星点分离</button>

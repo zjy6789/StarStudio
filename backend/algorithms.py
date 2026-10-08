@@ -1,16 +1,10 @@
-"""Float image pipeline. GHS mathematics adapted from Siril (GPL-3.0-or-later).
-
-Starrem2k13 model/inference conventions: code2k13 (MIT); see THIRD_PARTY.md.
-"""
+"""Float image pipeline. GHS mathematics adapted from Siril (GPL-3.0-or-later)."""
 from pathlib import Path
 import subprocess
-import threading
 import numpy as np
 import tifffile
 
 from .paths import ROOT
-_model = None
-_model_lock = threading.Lock()
 
 
 def validate_image(image):
@@ -22,39 +16,6 @@ def validate_image(image):
 
 def color_count(image):
     return 3 if image.shape[2] >= 3 else 1
-
-
-def starrem(image, progress=lambda x: None):
-    """Reuse upstream ONNX network, retaining floats and overlapping tile edges.
-
-    Upstream normalizes 8-bit input by 382. Normalized floats use 255/382.
-    Reflect context and crop the central 448px to avoid its black tile borders.
-    """
-    global _model
-    import onnxruntime as ort
-    with _model_lock:
-        if _model is None:
-            options = ort.SessionOptions()
-            options.intra_op_num_threads = 4
-            _model = ort.InferenceSession(str(ROOT / "vendor/starrem2k13/weights/model.onnx"),
-                                         options, providers=["CPUExecutionProvider"])
-    h, w, c = image.shape
-    tile, halo = 448, 32
-    padded = np.pad(image, ((halo, halo + tile), (halo, halo + tile), (0, 0)), mode="reflect")
-    out = np.empty_like(image)
-    total = c * ((h + tile - 1) // tile) * ((w + tile - 1) // tile)
-    done = 0
-    for channel in range(c):
-        for y in range(0, h, tile):
-            for x in range(0, w, tile):
-                patch = padded[y:y+512, x:x+512, channel]
-                tensor = np.ascontiguousarray(patch[None] * (255.0 / 382.0), dtype=np.float32)
-                prediction = _model.run(None, {_model.get_inputs()[0].name: tensor})[0].reshape(512, 512)
-                rh, rw = min(tile, h-y), min(tile, w-x)
-                out[y:y+rh, x:x+rw, channel] = prediction[halo:halo+rh, halo:halo+rw] * (382.0 / 255.0)
-                done += 1
-                progress(done / total)
-    return np.clip(out, 0, 1)
 
 
 def starnet(image, workdir, executable, stride=256, progress=lambda x: None):

@@ -6,9 +6,9 @@
 
 [下载安装包](https://github.com/zjy6789/StarStudio/releases) · [报告问题](https://github.com/zjy6789/StarStudio/issues) · [第三方来源与许可](THIRD_PARTY.md)
 
-Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python, image-processing dependencies and the MIT-licensed Starrem2k13 model. No separate Python installation or cloud account is required. This prerelease has not yet completed Photoshop UI validation; see [validation status](VALIDATION.md).
+Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前为 **0.5.0 Beta 预发布**。新安装包与星点加工页面尚未完成 Photoshop 原生端到端验证，不能视为稳定版。历史验证范围见 [VALIDATION.md](VALIDATION.md)。
+> 当前为 **0.5.1 Beta 预发布**。星点加工页面已在 Photoshop 2026 完成原生验证；干净电脑安装及其他 Photoshop 版本尚未验证。详见 [VALIDATION.md](VALIDATION.md)。
 
 ## 系统要求
 
@@ -20,12 +20,12 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 | 内存与磁盘 | 建议 16 GB 内存；全尺寸大批量 RAW 建议 32 GB 及 SSD。缓存需求随分辨率和堆栈模式变化。 |
 | 相机 RAW | 由捆绑的 LibRaw 支持；DNG 在 Photoshop 中的打开方式由 Camera Raw 决定。 |
 
-无需安装 Python、CUDA、Siril 或 StarNet，即可使用堆栈、默认星点分离、曲线、星点缩小、辉光、饱和度和重混合。**彗差减少单项功能需要另装 Siril 1.4.x**。
+无需安装 Python 或 CUDA，即可使用堆栈、曲线、星点缩小、辉光、饱和度和重混合。**星点分离需要另装 StarNet++ CLI；彗差减少需要另装 Siril 1.4.x**。两个外部引擎独立配置，不影响其余功能。
 
 ## 安装与更新
 
 1. 从 [Releases](https://github.com/zjy6789/StarStudio/releases) 下载 `StarStudio-版本-Windows-x64-Setup.exe`。Beta 请选择标有 **Pre-release** 的条目；“Source code” 压缩包是源码，不是安装包。
-2. 双击安装程序。它将处理组件、模型和面板放到 `%LOCALAPPDATA%\StarStudio`，生成本机专属配置，并调用 Adobe 安装工具安装面板。写入本项目目录不需要管理员权限；Adobe 的安装策略可能另外要求确认或提权。
+2. 双击安装程序。它将处理组件和面板放到 `%LOCALAPPDATA%\StarStudio`，生成本机专属配置，并调用 Adobe 安装工具安装面板。写入本项目目录不需要管理员权限；Adobe 的安装策略可能另外要求确认或提权。
 3. 在 Photoshop 打开 **增效工具 → Star Studio → Star Studio**（英文：Plugins → Star Studio）。若新面板尚未出现，保存工作后重新打开 Photoshop。
 4. 首次使用时允许插件启动本机处理组件。之后从 Photoshop 打开面板即可，无需运行 CMD 或保持服务窗口。
 
@@ -36,6 +36,19 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 **卸载：**在 Creative Cloud → 插件管理中卸载 Star Studio。关闭面板、等待后台退出后，可删除 `%LOCALAPPDATA%\StarStudio`，一并清除临时缓存与日志；不影响另存到其他目录的照片。项目不设置开机自启、登录自启或系统服务。
 
 **安装失败：**查看 `%LOCALAPPDATA%\StarStudio\artifacts\install.log`，确认 Creative Cloud 已安装且 Photoshop 满足版本要求；也可双击安装目录内自动生成的 `StarStudio.ccx`，通过 Creative Cloud 重试。单独分享这份 CCX 无法为另一台电脑提供完整运行环境，请分享 Release 的 EXE。
+
+### 安装 StarNet++ 星点分离引擎
+
+StarNet++ 只需配置一次。它是外部程序，本项目不随包分发；无需把原始照片交给 StarNet 的界面打开。
+
+1. 打开 [StarNet 官方旧版 CLI 下载页](https://starnetastro.com/cli-tools/legacy/)，在页面下方 **StarNet legacy CLI archives → Windows** 下载 **`StarNetv2CLI_Win.zip`**。当前插件使用旧版 v2 的 `starnet++.exe 输入.tif 输出.tif 步长` 接口；本机已验证 v2.0.2。请选择命令行 **CLI** 包。
+2. 阅读发行包许可，将 ZIP **完整解压**到固定目录，例如 `D:\AstroTools\StarNetv2CLI_Win`。保留 `starnet++.exe`、权重文件和所有 DLL 的相对位置；不要只复制 EXE。解压后不需要单独安装 Python、TensorFlow 或手动启动引擎。
+3. 打开 Star Studio 的 **星点分离 → 星点提取模型：StarNet++**，在“程序位置”填写完整路径，例如 `D:\AstroTools\StarNetv2CLI_Win\starnet++.exe`，不加引号。切换焦点后自动保存配置。
+4. 保持处理步长为 **256**，选择 Photoshop 中的源图层，点击 **执行星点分离**。插件会自动调用 StarNet++ 并创建两个结果图层；之后无需再填写位置。
+
+如已为 Siril 安装旧版 StarNet CLI，可直接填写同一 EXE 的路径。若提示“找不到 StarNet”，检查 EXE 的完整路径；若提示无法运行或找不到权重，检查完整解压目录及官方 README 中的运行要求。
+
+[官方最新版下载页](https://starnetastro.com/cli-tools/starnet/)提供更新的引擎。新版命令或文件名可能不同，当前插件尚未验证其兼容性；按上面的旧版 CLI 步骤可使用已支持的接口。更新引擎前请先保留现有可用目录。
 
 ## 从堆栈到重混合
 
@@ -67,9 +80,9 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 在 Photoshop 中打开照片，选择来源图层，点击 **执行星点分离**。
 
 - 生成 `XXX_starless` 背景和 `XXX_starmask` 星点图层，保留原始 `XXX`。星点图层初始隐藏，便于直接查看背景。
-- 默认 **Starrem2k13**，模型已随源码和安装包提供。需要 StarNet 时展开「星点提取模型」并指定 CLI 位置。
+- 首次使用前按上面的 [StarNet++ 安装步骤](#安装-starnet-星点分离引擎)配置 CLI 位置；之后直接执行。
 - 支持滤色和相加分离；重混合应选择与分离相同的方式。
-- 模型可能改变星云、星晕或地景细节；Starrem2k13 上游训练样本较少，质量须按照片评估，必要时用原图局部修正。
+- 模型可能改变星云、星晕或地景细节；请放大检查，必要时用原图局部修正。
 
 图层操作支持 RGB / 灰度、8 / 16 / 32 位普通范围像素。32 位 HDR 若超出 `0..1` 会报错，须先映射到普通范围；这与允许超范围高光的 RAW 堆栈流程不同。新图层保持文档尺寸、颜色配置与透明度；智能对象输出为新的像素图层。
 
@@ -99,8 +112,7 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 
 | 引擎/库 | 用途 | 随包提供 | 原项目 / 最新版 |
 | --- | --- | --- | --- |
-| Starrem2k13 | 默认星点提取 | **是**，MIT ONNX 模型及许可 | [源码与模型](https://github.com/code2k13/starrem2k13) |
-| StarNet v2 CLI | 可选星点提取 | 否，支持外部 CLI | [官方 CLI 下载](https://starnetastro.com/cli-tools/) |
+| StarNet++ v2 CLI | 星点提取，需单独安装 | 否，调用外部 CLI | [支持接口的旧版包](https://starnetastro.com/cli-tools/legacy/) · [官方最新版](https://starnetastro.com/cli-tools/starnet/) |
 | Siril | 彗差减少 CLI、重混合数学来源 | GPL 参考源码；CLI 另装 | [源码](https://gitlab.com/free-astro/siril) · [下载](https://siril.org/download/) |
 | Astroalign / SEP / OpenCV | 匹配、检测及重采样 | 是，随运行环境 | [Astroalign](https://github.com/quatrope/astroalign) · [SEP](https://github.com/sep-developers/sep) · [OpenCV](https://github.com/opencv/opencv) |
 | rawpy / LibRaw | RAW 解码 | 是，随运行环境 | [rawpy](https://github.com/letmaik/rawpy) · [LibRaw](https://www.libraw.org/download) |
@@ -108,8 +120,6 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 StarNet 不按本项目 GPL 许可发布，个人非商用不等于获得其源码或权重的再分发授权。本项目不重打包 StarNet；请从官网获取并遵循其条款。适配器对应旧版 **v2.0.2 `starnet++.exe`** 接口，不能承诺任意新版命令直接兼容。
 
 可将完整 Siril 或 StarNet 目录放到安装目录内 `engines/siril/` 或 `engines/starnet/`；Siril 也支持系统安装，StarNet 也可在面板选择其他位置。目录结构和版本要求见 [引擎配置](engines/README.md)。
-
-Starrem 模型位于 `vendor/starrem2k13/weights/model.onnx`，已固定哈希。自行替换时须确保输入输出约定兼容；上游最新版不一定格式相同。构建脚本核对固定模型，避免误打包未知权重。
 
 ## 隐私与后台组件
 
@@ -137,7 +147,7 @@ py -3.12 -m venv .venv
 
 ```powershell
 .venv\Scripts\python.exe -m pip install -r requirements-build.txt
-.venv\Scripts\python.exe tools\build_release.py --tag v0.5.0-beta.1
+.venv\Scripts\python.exe tools\build_release.py --tag v0.5.1-beta.1
 ```
 
 输出在 `dist/`：Windows EXE、LGPL 对应源码归档与 SHA256 清单。构建会下载与捆绑库版本对应的第三方源码，安装及日常处理无需这些下载。项目完整源码和构建脚本由对应 Git 标签提供。
@@ -146,7 +156,7 @@ py -3.12 -m venv .venv
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -q
-node --test tests\test_preview.js
+node --test tests\test_preview.js tests\test_star_processing.js
 ```
 
 `tools/` 的 smoke/native 脚本会实际处理图像，部分需要本地测试素材、Photoshop 或外部引擎；不要把它们作为安装步骤。持续集成不能代替 Photoshop 原生验证。
