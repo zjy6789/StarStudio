@@ -1,6 +1,10 @@
 """Float image pipeline. GHS mathematics adapted from Siril (GPL-3.0-or-later)."""
 from pathlib import Path
+import hashlib
+import json
 import subprocess
+import threading
+import time
 import numpy as np
 import tifffile
 
@@ -18,49 +22,140 @@ def color_count(image):
     return 3 if image.shape[2] >= 3 else 1
 
 
-def starnet(image, workdir, executable, stride=256, progress=lambda x: None):
-    exe = Path(executable)
+def starnet_info(executable):
+    exe = Path(executable).resolve()
     if not exe.is_file():
         raise ValueError(f"找不到 StarNet: {exe}")
-    if stride not in (64, 128, 256):
-        raise ValueError("StarNet stride 必须为 64、128 或 256")
-    workdir = Path(workdir)
-    source, output = workdir / "input.tif", workdir / "starless.tif"
-    # v2 CLI requires at least 256px; crop back after reflective edge padding.
+    if exe.stem.lower() == "starnet2":
+        license_file = exe.parent / "LICENSE.txt"
+        terms = license_file.read_bytes()
+        return {"modern": True, "product": "StarNet2", "minimum_size": 512,
+                "license": terms.decode("utf-8-sig"),
+                "license_sha256": hashlib.sha256(terms).hexdigest()}
+    if exe.stem.lower() == "starnet++":
+        return {"modern": False, "product": "StarNet++ v2", "minimum_size": 256}
+    raise ValueError("请选择官方 starnet2.exe 或旧版 starnet++.exe，保留原始文件名。")
+
+
+def starnet(image, workdir, executable, stride=256, progress=lambda x: None, license_sha256=None,
+            report=lambda state: None):
+    started = time.perf_counter()
+    report({"message": "准备引擎输入…"})
+    info = starnet_info(executable)
+    exe = Path(executable).resolve()
+    if info["modern"] and license_sha256 != info["license_sha256"]:
+        raise ValueError("请在星点提取模型中阅读并同意当前 StarNet2 许可后再执行。")
+    validate_image(image)
+    if stride not in ((64, 128, 256, 384) if info["modern"] else (64, 128, 256)):
+        raise ValueError("384 步长需要新版 StarNet2；旧版请选择 256、128 或 64")
+    workdir = Path(workdir).resolve()
+    suffix = ".fits" if info["modern"] else ".tif"
+    source, output = workdir / ("input" + suffix), workdir / ("starless" + suffix)
+    # The current CLI needs 512px; legacy v2 needs 256px. Crop after padding.
     h, w, c = image.shape
-    padded = np.pad(image, ((0, max(0, 256-h)), (0, max(0, 256-w)), (0, 0)), mode="reflect")
-    encoded = np.rint(padded * 65535).astype(np.uint16)
-    tifffile.imwrite(source, encoded[..., 0] if c == 1 else encoded,
-                     photometric="minisblack" if c == 1 else "rgb", metadata=None)
+    size = info["minimum_size"]
+    padded = np.pad(image, ((0, max(0, size-h)), (0, max(0, size-w)), (0, 0)), mode="reflect") if h < size or w < size else image
+    if info["modern"]:
+        from astropy.io import fits
+        fits.writeto(source, padded[..., 0] if c == 1 else padded.transpose(2, 0, 1), overwrite=True)
+        # CFITSIO in the Windows CLI cannot open Unicode absolute paths.
+        # Relative names work inside a Unicode job directory; weights and DLLs
+        # are located beside the executable by the official CLI itself.
+        command = [str(exe), "--input", source.name, "--output", output.name, "--stride", str(stride), "--machine-progress"]
+    else:
+        encoded = np.rint(padded * 65535).astype(np.uint16)
+        tifffile.imwrite(source, encoded[..., 0] if c == 1 else encoded,
+                         photometric="minisblack" if c == 1 else "rgb", metadata=None)
+        command = [str(exe), str(source), str(output), str(stride)]
     progress(0.05)
+    report({"prepareSeconds": time.perf_counter()-started, "message": "启动 StarNet 推理…"})
+    engine_started = time.perf_counter()
     with (workdir / "starnet.log").open("w", encoding="utf-8") as log:
-        result = subprocess.run([str(exe), str(source), str(output), str(stride)], cwd=exe.parent,
-                                stdout=log, stderr=subprocess.STDOUT, timeout=7200,
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        result = subprocess.Popen(command, cwd=workdir if info["modern"] else exe.parent,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                  encoding="utf-8", errors="replace",
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        def read_log():
+            for line in result.stdout:
+                log.write(line)
+                log.flush()
+                if not info["modern"]:
+                    continue
+                try:
+                    event = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if event.get("schema") == "starnetastro.cli.progress.v1" and event.get("stage") == "inference":
+                    percent = event.get("percent")
+                    if isinstance(percent, (int, float)) and np.isfinite(percent) and 0 <= percent <= 100:
+                        progress(.05 + .85*percent/100)
+                elif event.get("code") == "inference_backend":
+                    backend = str(event.get("message", ""))
+                    provider = next((name for name in ("DirectML", "CUDA", "CPU") if name.lower() in backend.lower()), "未知")
+                    report({"provider": provider, "message": "StarNet 推理（"+provider+"）…"})
+                elif event.get("code") == "output":
+                    report({"message": "引擎保存结果…"})
+        reader = threading.Thread(target=read_log, daemon=True)
+        reader.start()
+        try:
+            result.wait(timeout=7200)
+        except subprocess.TimeoutExpired:
+            result.kill()
+            result.wait()
+            raise
+        finally:
+            reader.join()
+            result.stdout.close()
+    report({"engineSeconds": time.perf_counter()-engine_started, "message": "读取引擎结果…"})
+    read_started = time.perf_counter()
     if result.returncode or not output.exists():
         detail = (workdir / "starnet.log").read_text(encoding="utf-8", errors="replace")[-1800:]
         raise RuntimeError(f"StarNet 失败 ({result.returncode}): {detail}")
-    data = tifffile.imread(output)
-    if data.dtype != np.uint16:
-        raise ValueError("StarNet 未返回 16 位 TIFF")
+    if info["modern"]:
+        data = fits.getdata(output)
+        if data.dtype.kind != "f" or data.dtype.itemsize != 4:
+            raise ValueError("StarNet2 未返回 32 位浮点 FITS")
+        data = data.astype(np.float32)
+        if data.ndim == 3:
+            data = data.transpose(1, 2, 0)
+    else:
+        data = tifffile.imread(output)
+        if data.dtype != np.uint16:
+            raise ValueError("StarNet 未返回 16 位 TIFF")
+        data = data.astype(np.float32) / 65535
     if data.ndim == 2:
         data = data[..., None]
     if data.shape != padded.shape:
         raise ValueError(f"StarNet 输出尺寸不符: {data.shape}")
+    validate_image(data)
+    report({"readSeconds": time.perf_counter()-read_started})
     progress(1)
-    return data[:h, :w].astype(np.float32) / 65535
+    return data[:h, :w]
 
 
-def separate(original, background, mode="screen"):
+def separate(original, background, mode="screen", preserve_model=False, star_encoding="gray"):
     validate_image(original)
     n = color_count(original)
     if background.shape != original[..., :n].shape:
         raise ValueError("背景尺寸不符")
     # Network can brighten some pixels. Bound the background to the source so
     # the star layer is nonnegative and exactly reconstructs the input.
-    bg = np.minimum(np.clip(background, 0, 1), original[..., :n])
+    if preserve_model:
+        validate_image(background)
+        bg = background
+    else:
+        bg = np.minimum(np.clip(background, 0, 1), original[..., :n])
     delta = original[..., :n] - bg
-    if mode == "screen":
+    if preserve_model:
+        if star_encoding not in ("gray", "signed"):
+            raise ValueError("未知修正星点编码")
+        # Preserve negative corrections instead of reimposing the source's
+        # dark, colored star edges on the model background. Integer Photoshop
+        # layers use a 50% gray offset with Linear Light; float32 uses addition.
+        stars = (delta+1)/2 if star_encoding == "gray" else delta
+    elif mode == "screen":
         stars = np.divide(delta, 1-bg, out=np.zeros_like(delta), where=bg < 1)
     elif mode == "add":
         stars = delta

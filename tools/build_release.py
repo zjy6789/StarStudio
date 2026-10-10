@@ -40,7 +40,7 @@ def archive(source, target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--tag', default='v0.5.1-beta.1')
+    parser.add_argument('--tag', default='v0.6.0-beta.1')
     parser.add_argument('--skip-freeze', action='store_true', help='Reuse an existing frozen runtime')
     args = parser.parse_args()
     if sys.platform != 'win32':
@@ -56,8 +56,10 @@ def main():
                         '--paths', str(ROOT), '--distpath', str(BUILD / 'frozen'),
                         '--workpath', str(BUILD / 'pyinstaller'), '--specpath', str(BUILD),
                         '--collect-all', 'rawpy',
+                        '--additional-hooks-dir', str(ROOT / 'tools/hooks'),
                         '--exclude-module', 'pytest', '--exclude-module', 'pip',
                         '--exclude-module', 'tkinter', '--exclude-module', 'matplotlib',
+                        '--exclude-module', 'colour', '--exclude-module', 'colour_demosaicing',
                         str(ROOT / 'tools/bridge_entry.py')], check=True, cwd=ROOT)
     stage = BUILD / ('StarStudio-' + args.tag[1:])
     if stage.exists():
@@ -75,13 +77,13 @@ def main():
     for name in ('LICENSE', 'README.md', 'THIRD_PARTY.md', 'VALIDATION.md', 'CHANGELOG.md'):
         shutil.copy2(ROOT / name, stage / name)
     shutil.copy2(ROOT / 'engines/README.md', stage / 'engines/README.md')
-    for name in ('KINOBLOOM-LICENSE.txt', 'siril-ght.c', 'stack-camera-calibrations.json'):
+    for name in ('KINOBLOOM-LICENSE.txt', 'COLOUR-DEMOSAICING-LICENSE.txt', 'siril-ght.c', 'stack-camera-calibrations.json'):
         shutil.copy2(ROOT / 'vendor' / name, stage / 'vendor' / name)
     compile_cs('BridgeLauncher.cs', stage / 'tools/StarStudioLauncher.exe')
 
     # Retain each installed runtime dependency's original license/notices, including
     # native libraries mentioned in wheel licenses. Development-only packages excluded.
-    excluded = {'pip', 'pytest', 'iniconfig', 'pluggy', 'colorama', 'pygments'}
+    excluded = {'pip', 'pytest', 'iniconfig', 'pluggy', 'colorama', 'pygments', 'colour-science', 'colour-demosaicing'}
     components = []
     components.append({'name': 'Python', 'version': sys.version.split()[0], 'source': 'https://www.python.org/downloads/'})
     base = Path(sys.base_prefix)

@@ -7,12 +7,14 @@ from pathlib import Path
 import subprocess
 import tempfile
 import re
+import json
 
 import cv2
 import numpy as np
 import tifffile
 from scipy.interpolate import PchipInterpolator
 from scipy.ndimage import gaussian_filter
+from scipy.signal import oaconvolve
 
 from .algorithms import color_count, validate_image
 
@@ -52,13 +54,21 @@ def curve_values(values, curve):
     return PchipInterpolator([0, .25, .5, .75, 1], anchors)(np.clip(values*2**exposure, 0, 1)).astype(np.float32)
 
 
-def round_stars(rgb, options, workdir, scale):
+def round_stars(rgb, options, workdir, scale, cache=None):
     """Use the installed GPL Siril, changing only detected elongated-star regions."""
     if not SIRIL.is_file():
         raise ValueError('彗差减少需要 Siril 1.4 或以上；本机未找到 siril-cli.exe。')
     radius = max(3, round(number(options, 'radius', 8, 3, 50)*scale))
     sigma = number(options, 'sigma', 2, .05, 10)
     roundness = number(options, 'roundness', .9, .1, .99)
+    strength = number(options, 'strength', .5, 0, 1)
+    key = (radius, sigma, roundness)
+    cached = cache.get('coma') if cache is not None else None
+    if cached and cached['key'] == key:
+        return rgb+cached['correction']*strength, cached['count']
+    if cache is not None:
+        cache.pop('coma', None)
+    cached = None
     with tempfile.TemporaryDirectory(prefix='star-shape-', dir=workdir) as folder:
         folder = Path(folder)
         a = rgb[..., 0] if rgb.shape[2] == 1 else rgb
@@ -98,8 +108,38 @@ def round_stars(rgb, options, workdir, scale):
             yy, xx = np.mgrid[y0:y1, x0:x1]
             distance = np.hypot(xx-x, yy-y)/radius
             mask[y0:y1, x0:x1] = np.maximum(mask[y0:y1, x0:x1], 1-smooth((distance-.6)/.4))
-        strength = number(options, 'strength', .5, 0, 1)
-        return rgb+(model-rgb)*(mask*strength)[..., None], len(stars)
+        correction = (model-rgb)*mask[..., None]
+        if cache is not None:
+            cache['coma'] = {'key': key, 'correction': correction, 'count': len(stars)}
+        return rgb+correction*strength, len(stars)
+
+
+def gaussian_halo(source, sigma):
+    """Same finite reflected Gaussian as ndimage, with bounded FFT batches."""
+    if sigma < 32:
+        return gaussian_filter(source, (sigma, sigma, 0), mode='reflect')
+    radius = int(4*sigma+.5)
+    x = np.arange(-radius, radius+1, dtype=np.float64)
+    kernel = np.exp(-.5*x*x/(sigma*sigma))
+    kernel = (kernel/kernel.sum()).astype(np.float32)
+    result = source
+    # Match ndimage's axis order and float32 intermediate storage. Symmetric
+    # padding repeats the edge pixel, i.e. ndimage's half-sample reflect mode.
+    for axis in (0, 1):
+        output = np.empty_like(source)
+        other = 1-axis
+        padding = [(0, 0)]*3
+        padding[axis] = (radius, radius)
+        shape = [1]*3
+        shape[axis] = len(kernel)
+        for start in range(0, result.shape[other], 128):
+            block = [slice(None)]*3
+            block[other] = slice(start, start+128)
+            block = tuple(block)
+            output[block] = oaconvolve(np.pad(result[block], padding, mode='symmetric'),
+                                      kernel.reshape(shape), mode='valid', axes=(axis,))
+        result = output
+    return result
 
 
 def eroded_luminance(lum, radius):
@@ -113,8 +153,25 @@ def eroded_luminance(lum, radius):
     return erode(low)*(1-(radius-low))+erode(low+1)*(radius-low)
 
 
-def process_stars(image, settings, workdir, scale=1., progress=lambda x: None):
+def process_stars(image, settings, workdir, scale=1., progress=lambda x: None, cache=None, encoding="black"):
+    if encoding not in ('black', 'gray', 'signed'):
+        raise ValueError('未知星点编码。')
+    original = image
+    correction = None
+    if encoding == 'gray':
+        validate_image(image)
+    if encoding != 'black':
+        n = color_count(image)
+        signed = image[..., :n]*2-1 if encoding == 'gray' else image[..., :n]
+        if signed.min() < -1:
+            raise ValueError('修正星点差值必须在 -1..1 内。')
+        correction = np.minimum(signed, 0)
+        image = image.copy()
+        image[..., :n] = np.maximum(signed, 0)
     validate_image(image)
+    if encoding != 'black' and not any(p.get('enabled') for p in settings.values()):
+        progress(1)
+        return original.copy(), {'reconstructedStars': 0}
     if not np.isfinite(scale) or not 0 < scale <= 1:
         raise ValueError('无效预览比例。')
     n = color_count(image)
@@ -125,7 +182,7 @@ def process_stars(image, settings, workdir, scale=1., progress=lambda x: None):
     details = {'reconstructedStars': 0}
     coma = settings.get('coma', {})
     if coma.get('enabled') and number(coma, 'strength', .5, 0, 1) > 0:
-        rgb, details['reconstructedStars'] = round_stars(rgb, coma, workdir, scale)
+        rgb, details['reconstructedStars'] = round_stars(rgb, coma, workdir, scale, cache)
     progress(.25)
     reduction = settings.get('reduction', {})
     if reduction.get('enabled'):
@@ -165,23 +222,40 @@ def process_stars(image, settings, workdir, scale=1., progress=lambda x: None):
         spread = number(glow, 'spread', .35, 0, 1)
         if lower >= upper:
             raise ValueError('辉光亮度下限必须小于上限。')
-        brightness = np.max(rgb, axis=2)
-        # KinoBloom frag_prefilter quadratic soft knee, operating in document values.
-        knee = softness
-        rq = np.clip(brightness-lower+knee, 0, 2*knee)
-        selected = np.maximum(rq*rq/(4*knee), brightness-lower)/np.maximum(brightness, 1e-5)
-        if upper < 1:
-            selected *= 1-smooth((brightness-upper)/softness)
-        source = rgb*selected[..., None]
-        if alpha is not None:
-            source *= alpha
-        halo = gaussian_filter(source, (radius, radius, 0), mode='reflect')*(1-spread)
-        if spread:
-            halo += gaussian_filter(source, (3*radius, 3*radius, 0), mode='reflect')*spread
+        upstream = json.dumps({name: settings.get(name, {}) for name in ('coma', 'reduction', 'curve', 'color')}, sort_keys=True)
+        key = (upstream, radius, lower, upper, softness, spread)
+        cached = cache.get('glow') if cache is not None else None
+        if cached and cached['key'] == key:
+            halo = cached['halo']
+        else:
+            if cache is not None:
+                cache.pop('glow', None)
+            cached = None
+            brightness = np.max(rgb, axis=2)
+            # KinoBloom frag_prefilter quadratic soft knee, operating in document values.
+            knee = softness
+            rq = np.clip(brightness-lower+knee, 0, 2*knee)
+            selected = np.maximum(rq*rq/(4*knee), brightness-lower)/np.maximum(brightness, 1e-5)
+            if upper < 1:
+                selected *= 1-smooth((brightness-upper)/softness)
+            source = rgb*selected[..., None]
+            if alpha is not None:
+                source *= alpha
+            halo = gaussian_halo(source, radius)*(1-spread)
+            if spread:
+                halo += gaussian_halo(source, 3*radius)*spread
+            if cache is not None:
+                cache['glow'] = {'key': key, 'halo': halo}
         # Soft screen-like blend avoids hard clipping original bright star cores.
         rgb += (1-rgb)*(-np.expm1(-strength*halo))
     progress(.95)
     output = image.copy()
     output[..., :n] = np.where(visible[..., None], np.clip(rgb, 0, 1), image[..., :n])
+    if correction is not None:
+        signed = output[..., :n]+correction
+        encoded = (signed+1)/2 if encoding == 'gray' else signed
+        # Process the positive star signal; retain the negative edge correction
+        # and all invisible source pixels, without blurring or clipping them.
+        output[..., :n] = np.where(visible[..., None], encoded, original[..., :n])
     progress(1)
     return output, details

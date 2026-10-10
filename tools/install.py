@@ -37,6 +37,17 @@ with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as z:
 print(f"Package: {package}")
 installer = Path(os.environ['COMMONPROGRAMFILES']) / 'Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent.exe'
 if installer.exists():
+    installed = Path(os.environ['APPDATA']) / f'Adobe/UXP/Plugins/External/local.astro.starlayers_{version}'
+    if installed.exists():
+        storage = Path(os.environ['APPDATA']) / 'Adobe/UXP/PluginsStorage/PHSP'
+        saved = {path: path.read_bytes() for path in storage.glob('*/External/local.astro.starlayers/PluginData/model-settings.json')}
+        removed = subprocess.run([str(installer), '/remove', 'Star Studio'], capture_output=True, text=True, errors='replace')
+        print(f'UPIA refresh exit={removed.returncode}\n{removed.stdout}\n{removed.stderr}')
+        if removed.returncode:
+            raise SystemExit(removed.returncode)
+        for path, content in saved.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
     result = subprocess.run([str(installer), "/install", str(package)], capture_output=True, text=True, errors="replace")
     print(f"UPIA exit={result.returncode}\n{result.stdout}\n{result.stderr}")
     if result.returncode:

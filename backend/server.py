@@ -11,7 +11,7 @@ from urllib.parse import urlparse, parse_qs
 import uuid
 import numpy as np
 from PIL import Image
-from .algorithms import ROOT, validate_image, color_count, starnet, separate, stretch, combine
+from .algorithms import ROOT, validate_image, color_count, starnet, starnet_info, separate, stretch, combine
 
 
 def sequence(image, chain, current):
@@ -27,6 +27,7 @@ class Store:
         self.images, self.jobs = {}, {}
         self.worker = threading.Lock()
         self.preview_key = None
+        self.processing_cache = {}
 
     def create(self, w, h, c):
         if not (0 < w <= 65536 and 0 < h <= 65536 and w*h <= 250_000_000 and c in (1, 2, 3, 4)):
@@ -65,6 +66,8 @@ class Store:
         entry = self.images.pop(key)
         entry["data"]._mmap.close()
         (self.path / f"{key}.npy").unlink()
+        if self.processing_cache.get("source", (None,))[0] == key:
+            self.processing_cache.clear()
 
     def job(self, request):
         key = uuid.uuid4().hex
@@ -88,10 +91,24 @@ class Store:
                             job["result"] = stack(request,self.path,progress,message,lambda:job.get("cancel",False))
                     elif request["op"] == "processStars":
                         from .star_processing import process_stars, curve_values
+                        if job.get("cancel"):
+                            job["state"] = "canceled"
+                            return
                         job["message"] = "正在加工星点…"
+                        scale = float(request.get("scale", 1))
+                        encoding = request.get("starEncoding", "black")
+                        source = (request["image"], scale, encoding)
+                        if self.processing_cache.get("source") != source:
+                            self.processing_cache.clear()
+                            self.processing_cache["source"] = source
+                        options = {"encoding": encoding} if encoding != "black" else {}
                         output, details = process_stars(self.get(request["image"]), request["settings"],
-                                                       self.path, float(request.get("scale", 1)), progress)
-                        job["result"] = {"image": self.save(output), **details}
+                                                       self.path, scale, progress, self.processing_cache, **options)
+                        if job.get("cancel"):
+                            job["state"] = "canceled"
+                            return
+                        job["result"] = {"image": self.save(output), **details,
+                                         "curve": curve_values(np.linspace(0, 1, 256), request["settings"].get("curve", {})).tolist()}
                         if request.get("preview"):
                             import base64
                             rgb = output[..., :color_count(output)].copy()
@@ -102,7 +119,10 @@ class Store:
                             buffer = io.BytesIO()
                             Image.fromarray(np.rint(rgb*255).astype(np.uint8)).save(buffer, format="PNG")
                             job["result"]["preview"] = "data:image/png;base64,"+base64.b64encode(buffer.getvalue()).decode()
-                            job["result"]["curve"] = curve_values(np.linspace(0, 1, 256), request["settings"].get("curve", {})).tolist()
+                        if job.get("cancel"):
+                            self.delete(job.pop("result")["image"])
+                            job["state"] = "canceled"
+                            return
                     elif request["op"] == "extract":
                         original = self.get(request["image"])
                         validate_image(original)
@@ -111,10 +131,21 @@ class Store:
                             raise ValueError("星点分离仅支持 StarNet++；请在星点提取模型中配置程序位置。")
                         folder = self.path / key
                         folder.mkdir()
+                        timings = {}
+                        def engine_report(state):
+                            timings.update({name: value for name, value in state.items() if name.endswith("Seconds")})
+                            job.update({name: value for name, value in state.items() if name in ("message", "provider")})
                         bg = starnet(colors, folder, request.get("executable", str(ROOT / "engines/starnet/starnet++.exe")),
-                                     int(request.get("stride", 256)), progress)
-                        bg, stars = separate(original, bg, request.get("mode", "screen"))
-                        job["result"] = {"background": self.save(bg), "stars": self.save(stars)}
+                                     int(request.get("stride", 256)), progress, request.get("license_sha256"), engine_report)
+                        job["message"] = "生成背景和星点图层…"
+                        separate_started = time.perf_counter()
+                        preserve_model = request.get("preserveModelBackground", False)
+                        encoding = request.get("starEncoding", "gray") if preserve_model else "black"
+                        bg, stars = separate(original, bg, request.get("mode", "screen"), preserve_model, encoding)
+                        job["result"] = {"background": self.save(bg), "stars": self.save(stars),
+                                         "starEncoding": encoding,
+                                         "timings": timings, "provider": job.get("provider", "CPU（旧版）")}
+                        timings["separateSeconds"] = time.perf_counter()-separate_started
                     elif request["op"] == "mix":
                         b = self.get(request["background"])
                         s = self.get(request["stars"])
@@ -130,7 +161,10 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                job.update(state="error", error=str(e))
+                if request["op"] == "processStars" and job.get("cancel"):
+                    job["state"] = "canceled"
+                else:
+                    job.update(state="error", error=str(e))
         threading.Thread(target=run, daemon=True).start()
         return key
 
@@ -212,6 +246,8 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.command == "DELETE":
                     store.delete(key)
                     self.reply({"ok": True})
+            elif self.command == "POST" and parts == ["starnet-info"]:
+                self.reply(starnet_info(json.loads(body)["executable"]))
             elif self.command == "POST" and parts == ["jobs"]:
                 self.reply({"id": store.job(json.loads(body))})
             elif len(parts) == 2 and parts[0] == "jobs" and self.command in ("GET", "DELETE"):

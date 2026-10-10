@@ -17,6 +17,32 @@ def test_separation_round_trip_including_saturated_and_brightened_pixels(mode, c
     assert b.min()>=0 and s.min()>=0 and b.max()<=1 and s.max()<=1
 
 
+@pytest.mark.parametrize('encoding', ['gray', 'signed'])
+@pytest.mark.parametrize('channels', [1, 2, 3, 4])
+def test_preserved_model_background_retains_negative_corrections(encoding, channels):
+    original = np.random.default_rng(41).random((37, 53, channels), dtype=np.float32)
+    n = 3 if channels >= 3 else 1
+    predicted = np.random.default_rng(8).random((37, 53, n), dtype=np.float32)
+    before = original.copy()
+    b, s = separate(original, predicted, preserve_model=True, star_encoding=encoding)
+    np.testing.assert_array_equal(b[..., :n], predicted)
+    delta = s[..., :n]*2-1 if encoding == 'gray' else s[..., :n]
+    assert delta.min() < 0 and delta.max() > 0
+    np.testing.assert_allclose(b[..., :n]+delta, original[..., :n], atol=1.2e-7)
+    if channels != n:
+        np.testing.assert_array_equal(b[..., n:], original[..., n:])
+        np.testing.assert_array_equal(s[..., n:], original[..., n:])
+    np.testing.assert_array_equal(original, before)
+
+
+def test_preserved_model_rejects_invalid_output_instead_of_clipping():
+    original = np.full((2, 3, 3), .2, dtype=np.float32)
+    with pytest.raises(ValueError, match='0..1'):
+        separate(original, np.full_like(original, 1.1), preserve_model=True)
+    with pytest.raises(ValueError, match='编码'):
+        separate(original, original, preserve_model=True, star_encoding='unknown')
+
+
 @pytest.mark.parametrize("kind", ["ghs", "asinh"])
 @pytest.mark.parametrize("b", [-5, -1.00001, -1, -.01, 0, .01, 1, 15])
 def test_stretch_endpoints_monotonicity_and_protected_segments(kind, b):

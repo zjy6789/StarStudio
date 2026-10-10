@@ -116,6 +116,108 @@ def _camera_metadata(tags):
             'illuminant':int(tags[50777+index].value)}
 
 
+def exposure_metadata(path):
+    """Read acquisition settings without rendering or changing source pixels."""
+    import exifread
+    with Path(path).open('rb') as stream:
+        tags = exifread.process_file(stream, details=False)
+    result = {}
+    for key, names in {'exposure':['EXIF ExposureTime'], 'iso':['EXIF ISOSpeedRatings','EXIF PhotographicSensitivity'],
+                       'aperture':['EXIF FNumber'], 'focalLength':['EXIF FocalLength']}.items():
+        tag = next((tags[name] for name in names if name in tags),None)
+        if tag is not None and tag.values:
+            result[key] = float(tag.values[0])
+    if 'Image Model' in tags:
+        result['model'] = str(tags['Image Model'])
+    return result
+
+
+def _raw_metadata(raw, path, dng_meta=None):
+    if raw.num_colors != 3:
+        raise ValueError('当前 RAW 颜色平面不是 RGB，暂不支持此相机。')
+    matrix = np.asarray(dng_meta['matrix']) if dng_meta else raw.rgb_xyz_matrix[:3].copy()
+    camera = str(raw.sizes.raw_width)+'x'+str(raw.sizes.raw_height)+' camera RGB'
+    illuminant = 21
+    if path.suffix.lower() == '.nef':
+        with tifffile.TiffFile(path) as f:
+            camera = str(f.pages[0].tags[272].value)
+        if abs(np.linalg.det(matrix)) < 1e-8:
+            calibration = json.loads((ROOT/'vendor/stack-camera-calibrations.json').read_text(encoding='utf-8'))['cameras'].get(camera)
+            if calibration:
+                matrix = np.asarray(calibration['matrix'])
+                illuminant = calibration['illuminant']
+    wb = np.asarray(raw.camera_whitebalance[:3],dtype=float)
+    if np.any(wb <= 0):
+        wb = np.asarray(raw.daylight_whitebalance[:3],dtype=float)
+    if abs(np.linalg.det(matrix)) < 1e-8 or np.any(wb <= 0):
+        raise ValueError('RAW 缺少有效颜色矩阵或白平衡，无法保留可靠颜色。')
+    return dng_meta or {'space':'camera','matrix':matrix.tolist(),'neutral':(wb[1]/wb).tolist(),
+                       'raw':True,'camera':camera,'illuminant':illuminant}
+
+
+def read_sensor_frame(path, linear_tiff=False):
+    """Calibration in native ADU before demosaicing; no LibRaw postprocess."""
+    path = Path(path)
+    acquisition = exposure_metadata(path)
+    if path.suffix.lower() in RAW_EXTENSIONS:
+        import rawpy
+        dng_meta = None
+        if path.suffix.lower() == '.dng':
+            with tifffile.TiffFile(path) as f:
+                dng_meta = _camera_metadata(f.pages[0].tags)
+                if any(int(p.photometric) == 34892 for p in f.pages):
+                    raise ValueError('校准需原始 Bayer RAW；LinearRaw DNG 已去马赛克，请使用原始照片。')
+        with rawpy.imread(str(path)) as raw:
+            pattern = raw.raw_pattern
+            if pattern is None or pattern.shape != (2,2):
+                raise ValueError('RAW 校准目前支持 Bayer 传感器；X-Trans 与其他排列仍可使用无校准堆栈。')
+            meta = _raw_metadata(raw,path,dng_meta)
+            # Prefer LibRaw's acquisition metadata; it also handles RAW formats
+            # whose EXIF container is not understood by ExifRead.
+            other = raw.other
+            for key,value in [('exposure',other.shutter_speed),('iso',other.iso_speed),
+                              ('aperture',other.aperture),('focalLength',other.focal_length)]:
+                if value > 0:
+                    acquisition[key] = float(value)
+            if not np.isclose(raw.sizes.pixel_aspect,1):
+                raise ValueError('RAW 校准暂不支持非正方形像素，避免校准后改变传感器几何比例。')
+            # raw_pattern is in full sensor coordinates. Crop margins can shift parity.
+            pattern = np.roll(pattern,(-raw.sizes.top_margin%2,-raw.sizes.left_margin%2),axis=(0,1))
+            colors = raw.color_desc.decode('ascii')
+            bayer = ''.join(colors[int(i)] for i in pattern.ravel())
+            if bayer not in {'RGGB','BGGR','GRBG','GBRG'}:
+                raise ValueError('不支持的 Bayer 颜色排列。')
+            black = np.asarray(raw.black_level_per_channel,dtype=np.float32)[pattern]
+            white = float(raw.white_level)
+            data = raw.raw_image_visible.astype(np.float32)
+            saturated = int(np.count_nonzero(data >= white))
+            for y in range(2):
+                for x in range(2):
+                    data[y::2,x::2] -= black[y,x]
+            if raw.sizes.flip not in (0,3,5,6):
+                raise ValueError('不支持的 RAW 旋转方向。')
+            meta.update(acquisition)
+            meta.update({'sensorShape':list(data.shape),'bayer':bayer,'black':black.tolist(),
+                         'white':white,'flip':int(raw.sizes.flip),'saturated':saturated,
+                         'sensorSize':[raw.sizes.raw_height,raw.sizes.raw_width],
+                         'crop':[raw.sizes.top_margin,raw.sizes.left_margin]})
+            return data, meta
+    if path.suffix.lower() not in {'.tif','.tiff'} or not linear_tiff:
+        raise ValueError('校准请使用原始 Bayer RAW，或确认已线性显影且去除黑电平的 TIFF；JPEG/PNG 不适合传感器校准。')
+    with tifffile.TiffFile(path) as f:
+        page = f.pages[0]
+        profile = page.tags[34675].value if 34675 in page.tags else None
+        if profile and profile != linear_profile():
+            raise ValueError('TIFF 校准目前仅支持无 ICC 或 Star Studio 线性 ProPhoto ICC，避免在非线性或变换后的通道中误校准。')
+        if page.dtype.kind not in {'u','f'} or page.dtype.itemsize < 2:
+            raise ValueError('TIFF 校准需要 16 位整数或 32 位浮点数据。')
+    data, meta = read_frame(path)
+    meta.update(acquisition)
+    meta.update({'sensorShape':list(data.shape),'bayer':None,'black':0,'white':1,
+                 'saturated':int(np.count_nonzero(data >= 1))})
+    return data,meta
+
+
 def read_frame(path):
     path = Path(path)
     dng_meta = None
@@ -135,31 +237,12 @@ def read_frame(path):
     if path.suffix.lower() in RAW_EXTENSIONS:
         import rawpy
         with rawpy.imread(str(path)) as raw:
-            if raw.num_colors != 3:
-                raise ValueError('当前 RAW 颜色平面不是 RGB，暂不支持此相机。')
-            matrix = np.asarray(dng_meta['matrix']) if dng_meta else raw.rgb_xyz_matrix[:3].copy()
-            camera = str(raw.sizes.raw_width)+'x'+str(raw.sizes.raw_height)+' camera RGB'
-            illuminant = 21
-            if path.suffix.lower() == '.nef':
-                with tifffile.TiffFile(path) as f:
-                    camera = str(f.pages[0].tags[272].value)
-                if abs(np.linalg.det(matrix)) < 1e-8:
-                    calibration = json.loads((ROOT/'vendor/stack-camera-calibrations.json').read_text(encoding='utf-8'))['cameras'].get(camera)
-                    if calibration:
-                        matrix = np.asarray(calibration['matrix'])
-                        illuminant = calibration['illuminant']
-            wb = np.asarray(raw.camera_whitebalance[:3], dtype=float)
-            if np.any(wb <= 0):
-                wb = np.asarray(raw.daylight_whitebalance[:3], dtype=float)
-            if abs(np.linalg.det(matrix)) < 1e-8 or np.any(wb <= 0):
-                raise ValueError('RAW 缺少有效颜色矩阵或白平衡，无法保留可靠颜色。')
+            meta = _raw_metadata(raw,path,dng_meta)
             a = raw.postprocess(output_bps=16, gamma=(1, 1), no_auto_bright=True,
                                 output_color=rawpy.ColorSpace.raw, user_wb=[1, 1, 1, 1],
                                 use_camera_wb=False, use_auto_wb=False, bright=1,
                                 adjust_maximum_thr=0, user_sat=raw.white_level,
                                 demosaic_algorithm=rawpy.DemosaicAlgorithm.AHD)
-            meta = dng_meta or {'space':'camera', 'matrix':matrix.tolist(), 'neutral':(wb[1]/wb).tolist(),
-                    'raw':True, 'camera':camera, 'illuminant':illuminant}
             return a.astype(np.float32)/65535, meta
     profile = None
     if path.suffix.lower() in {'.tif', '.tiff'}:
@@ -187,7 +270,7 @@ def read_frame(path):
         if np.any(a[..., 3] != 1):
             raise ValueError('堆栈素材包含透明像素，请使用不透明照片。')
         a = a[..., :3].copy()
-    if profile:
+    if profile and profile != linear_profile():
         a = _profile_decode(a, profile)
     if not np.isfinite(a).all():
         raise ValueError('照片包含无效像素。')
@@ -221,9 +304,9 @@ def preview_png(image, meta, max_size=1280):
     return 'data:image/png;base64,'+base64.b64encode(buf.getvalue()).decode()
 
 
-def write_result(path, image, meta, format):
+def write_result(path, image, meta, format, calibration=None):
     path = Path(path)
-    if format not in {'dng', 'tiff16', 'tiff32'}:
+    if format not in {'dng', 'tiff16', 'tiff32', 'fits16', 'fits32'}:
         raise ValueError('未知保存格式。')
     temporary = path.with_name(path.name+'.part')
     try:
@@ -242,6 +325,48 @@ def write_result(path, image, meta, format):
             tifffile.imwrite(temporary, image, photometric=34892, planarconfig='contig', extrasamples=False, metadata=None, extratags=tags,
                              software='Star Studio', rowsperstrip=32, subfiletype=0)
             return_info = {'scale':1, 'clipped':0}
+        elif format in {'fits16','fits32'}:
+            from astropy.io import fits
+            # FITS axis order is (channel, row, column). Keep camera RGB and
+            # its metadata rather than forcing a color conversion or stretch.
+            encoded = np.lib.format.open_memmap(path.with_name(path.name+'.encoded.npy'),mode='w+',
+                                               dtype='>i2' if format == 'fits16' else '>f4',shape=(3,*image.shape[:2]))
+            low, high = float(np.nanmin(image)),float(np.nanmax(image))
+            step = (high-low)/65535 if high > low else 1.
+            offset = low+32768*step if high > low else low
+            undefined = int(np.count_nonzero(~np.isfinite(image)))
+            if undefined and format == 'fits16':
+                raise ValueError('16 位 FITS 无法同时完整表示全部量化级与无覆盖像素；请使用 32 位 FITS/DNG/TIFF。')
+            for y in range(0,len(image),128):
+                block = np.moveaxis(image[y:y+128],-1,0)
+                if format == 'fits16':
+                    block = block.astype(np.float64)
+                encoded[:,y:y+128] = np.clip(np.rint((block-offset)/step),-32768,32767).astype(np.int16) if format == 'fits16' else block
+            header = fits.Header()
+            header['ORIGIN'] = 'Star Studio'
+            header['COLORSPC'] = 'CAMERA' if meta['space'] == 'camera' else 'LINEAR PROPHOTO RGB'
+            header['CHANNELS'] = 'RGB'
+            header['BUNIT'] = 'relative linear signal'
+            if meta.get('exposure'):
+                header['EXPTIME'] = meta['exposure']
+            if meta.get('iso'):
+                header['ISOSPEED'] = meta['iso']
+            for kind,count in (calibration or {}).get('counts',{}).items():
+                header[{'bias':'NBIAS','dark':'NDARK','flat':'NFLAT','darkflat':'NDFLAT'}[kind]] = count
+            # Write encoded integers first. Astropy removes manually attached
+            # scaling cards on a data-loaded HDU, so attach them header-only.
+            primary = fits.PrimaryHDU(encoded)
+            primary.header.extend(header,update=True)
+            payload = json.dumps({'color':meta,'calibration':calibration},ensure_ascii=True)
+            metadata = fits.BinTableHDU.from_columns([fits.Column(name='JSON',format=f'{len(payload)}A',array=[payload])],name='STARMETA')
+            fits.HDUList([primary,metadata]).writeto(temporary,overwrite=True)
+            if format == 'fits16':
+                with fits.open(temporary,mode='update',do_not_scale_image_data=True) as stored:
+                    stored[0].header['BSCALE'] = step
+                    stored[0].header['BZERO'] = offset
+            return_info = {'scale':1.,'clipped':0,'quantizationStep':step if format == 'fits16' else 0,
+                           'offset':offset if format == 'fits16' else 0,'undefinedPixels':undefined,
+                           'space':meta['space']}
         else:
             a = image
             if meta['space'] == 'camera':

@@ -10,9 +10,10 @@ Star Studio 自有代码按 GPL-3.0-or-later 发布，完整许可在根目录 L
 
 ## StarNet v2 — 星点分离的外部程序
 
-- [官网与最新版 CLI](https://starnetastro.com/cli-tools/)。旧版适配器对应 v2.0.2 的 `starnet++.exe` 接口，新版接口不一定兼容。
+- [官网与最新版 CLI](https://starnetastro.com/cli-tools/starnet/)。支持 StarNet2 2.6.2 的 `starnet2.exe` 命名参数/FITS 接口，以及 v2.0.2 的 `starnet++.exe` 位置参数/TIFF 接口；两者均作为外部独立进程调用。
 - 本项目不包含 StarNet 程序、权重、测试样片或源码。许可证由用户获取的官方发行包提供。
 - 个人非商业天文处理许可不等同于源码开源或再分发授权，StarNet 不由本项目 GPL 许可覆盖。
+- 新版发行包许可（2026-09-07）要求集成明确标识 StarNet2、提供完整条款并取得用户肯定接受。面板读取用户安装目录的原文并按 SHA-256 保存接受记录，条款改变需重新接受；引擎只从官网直接下载，不随 Star Studio 分发，不直接加载模型。不将 StarNet 输出加入本项目测试样片或资产；本地集成调用检查与用户比较结果不上传仓库。
 
 ## KinoBloom — MIT
 
@@ -29,6 +30,12 @@ Star Studio 自有代码按 GPL-3.0-or-later 发布，完整许可在根目录 L
 | LibRaw | RAW 解码库 | LGPL-2.1 / CDDL 双许可，分发按 LGPL-2.1 · [LibRaw](https://www.libraw.org/) |
 | OpenCV | 投影精化、Lanczos4 重采样及形态学 | Apache-2.0 · [opencv/opencv](https://github.com/opencv/opencv) |
 | SciPy / scikit-image | 曲线、滤波及变换估计 | BSD-3-Clause · [SciPy](https://github.com/scipy/scipy) · [scikit-image](https://github.com/scikit-image/scikit-image) |
+| ccdproc 2.5.1 | 主校准场合成、偏置/暗场减法与平场校准 | BSD-3-Clause · [astropy/ccdproc](https://github.com/astropy/ccdproc/tree/2.5.1) |
+| Astropy 8.0.1 | CCDData、Sigma/MAD 统计与标准 FITS I/O | BSD-3-Clause · [astropy/astropy](https://github.com/astropy/astropy/tree/v8.0.1) |
+| ExifRead 3.5.1 | 拍摄参数与相机型号读取 | BSD-3-Clause · [ianare/exif-py](https://github.com/ianare/exif-py) |
+| Colour demosaicing | 校准后的浮点 Bayer Malvar 去马赛克 | BSD-3-Clause · [v0.2.6 源码](https://github.com/colour-science/colour-demosaicing/blob/v0.2.6/colour_demosaicing/bayer/demosaicing/malvar2004.py) |
+
+`backend/demosaic.py` 适配 Colour Developers 的 Malvar2004 实现（Copyright 2015 Colour Developers），保留算法，改为 float32 分块及相位切片；原版权和完整许可保存在 `vendor/COLOUR-DEMOSAICING-LICENSE.txt`，构建脚本随包复制。ccdproc/Astropy 直接作为库调用，不独立复制其校准函数；wheel 许可继续由构建脚本收入 `licenses/`。实际研究来源与适配边界见 [校准说明](docs/CALIBRATION.md)。
 
 Nikon Z5_2 的九个校准矩阵整数取自 [RawSpeed 相机数据库](https://github.com/darktable-org/rawspeed/blob/develop/data/cameras.xml)，由 RawSpeed camera database contributors 贡献，按 [CC-BY-SA-3.0](https://creativecommons.org/licenses/by-sa/3.0/) 使用。`vendor/stack-camera-calibrations.json` 转为 1/10000 小数单位并保留来源、署名及相同许可；仅用于该型号解码器返回空矩阵的情况。
 

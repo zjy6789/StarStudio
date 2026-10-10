@@ -14,7 +14,8 @@ from backend.algorithms import combine
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--sample', type=Path, required=True, help='Your RGB 16-bit TIFF sample (not distributed)')
-parser.add_argument('--starnet', type=Path, required=True, help='Legacy v2 starnet++.exe with its complete engine directory')
+parser.add_argument('--starnet', type=Path, required=True, help='Official starnet2.exe or legacy starnet++.exe, complete directory')
+parser.add_argument('--accept-starnet-license', action='store_true', help='Confirm you accept the full LICENSE.txt beside starnet2.exe')
 args=parser.parse_args()
 config=json.loads((root/'plugin/bridge.json').read_text())
 def api(path, body=None, binary=False):
@@ -51,8 +52,11 @@ for y in range(0,h,128):
 save('PS-test-input',a)
 metrics={}
 for engine in ['starnet']:
+    info=api('/starnet-info',dict(executable=str(args.starnet)))
+    if info['modern'] and not args.accept_starnet_license:
+        raise ValueError('Read the engine LICENSE.txt, then pass --accept-starnet-license only if you accept it.')
     start=time.monotonic()
-    output=job(dict(op='extract',image=key,engine=engine,mode='screen',executable=str(args.starnet)))
+    output=job(dict(op='extract',image=key,engine=engine,mode='screen',executable=str(args.starnet),license_sha256=info.get('license_sha256')))
     b,s=download(output['background'],a.shape),download(output['stars'],a.shape)
     reconstructed=combine(b,s,'screen')
     error=float(np.max(np.abs(reconstructed-a)))

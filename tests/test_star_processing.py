@@ -3,7 +3,8 @@ import time
 import numpy as np
 import pytest
 
-from backend.star_processing import SIRIL, process_stars, luminance, curve_values
+from backend.star_processing import SIRIL, process_stars, luminance, curve_values, gaussian_halo
+from scipy.ndimage import gaussian_filter
 from backend.server import Store
 
 
@@ -26,6 +27,39 @@ def test_disabled_edits_identity_and_alpha(tmp_path, channels):
     np.testing.assert_array_equal(image, original)
     assert result.dtype == np.float32
     assert details['reconstructedStars'] == 0
+
+
+@pytest.mark.parametrize('encoding', ['gray', 'signed'])
+def test_corrected_stars_keep_negative_signal_and_alpha_during_processing(tmp_path, encoding):
+    signed = np.random.default_rng(2).uniform(-.3, .3, (31, 29, 4)).astype(np.float32)
+    signed[..., 3] = np.random.default_rng(3).random((31, 29), dtype=np.float32)
+    signed[0, :, 3] = 0
+    image = signed.copy()
+    if encoding == 'gray':
+        image[..., :3] = (image[..., :3]+1)/2
+    neutral, _ = process_stars(image, {}, tmp_path, encoding=encoding)
+    np.testing.assert_array_equal(neutral, image)
+    positive = image.copy()
+    decoded = image[..., :3]*2-1 if encoding == 'gray' else image[..., :3]
+    positive[..., :3] = np.maximum(decoded, 0)
+    settings = {'curve': {'enabled': True, 'exposure': .5},
+                'glow': {'enabled': True, 'radius': 2, 'lower': .05}}
+    expected, _ = process_stars(positive, settings, tmp_path)
+    expected[..., :3] += np.minimum(decoded, 0)
+    if encoding == 'gray':
+        expected[..., :3] = (expected[..., :3]+1)/2
+    expected[0] = image[0]
+    result, _ = process_stars(image, settings, tmp_path, encoding=encoding)
+    np.testing.assert_array_equal(result, expected)
+    np.testing.assert_array_equal(result[..., 3], image[..., 3])
+
+
+@pytest.mark.parametrize('encoding', ['gray', 'signed'])
+def test_corrected_processing_rejects_out_of_range_instead_of_truncating(tmp_path, encoding):
+    for value in [-1.1, 1.1, float('nan')]:
+        image = np.full((2, 3, 3), value, dtype=np.float32)
+        with pytest.raises(ValueError):
+            process_stars(image, {}, tmp_path, encoding=encoding)
 
 
 def test_curve_monotone_black_and_hue(tmp_path):
@@ -122,3 +156,64 @@ def test_processing_job_preview_and_full_match(tmp_path):
     assert len(a['result']['curve']) == 256
     np.testing.assert_array_equal(store.get(a['result']['image']), store.get(b['result']['image']))
     np.testing.assert_array_equal(store.get(key), image)
+
+
+@pytest.mark.parametrize('sigma', [.5, 12, 31.875, 32, 120, 360])
+@pytest.mark.parametrize('channels', [1, 3])
+def test_full_resolution_gaussian_matches_finite_reflected_filter(sigma, channels):
+    # Asymmetric edges expose periodic, zero, or whole-sample mirror padding.
+    image = np.random.default_rng(17).random((173, 149, channels), dtype=np.float32)
+    image[:9, :23] = 0
+    image[0, -1] = 1
+    image[83, 61] = 1
+    expected = gaussian_filter(image, (sigma, sigma, 0), mode='reflect')
+    actual = gaussian_halo(image, sigma)
+    assert actual.shape == image.shape and actual.dtype == np.float32
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=5e-7)
+
+
+def test_glow_cache_reuses_strength_and_invalidates_upstream(tmp_path, monkeypatch):
+    calls = []
+    def blur(source, sigma):
+        calls.append(sigma)
+        return gaussian_halo(source, sigma)
+    monkeypatch.setattr('backend.star_processing.gaussian_halo', blur)
+    image, cache = star_image(), {}
+    settings = {'glow': dict(enabled=True, radius=12, lower=.3, strength=1)}
+    first, _ = process_stars(image, settings, tmp_path, cache=cache)
+    assert calls == [12, 36]
+    halo = cache['glow']['halo']
+    settings['glow']['strength'] = 2
+    cached, _ = process_stars(image, settings, tmp_path, cache=cache)
+    assert calls == [12, 36]
+    assert cache['glow']['halo'] is halo
+    fresh, _ = process_stars(image, settings, tmp_path)
+    np.testing.assert_array_equal(cached, fresh)
+    assert np.max(np.abs(first-cached)) > 0
+    settings['curve'] = dict(enabled=True, midtones=.62)
+    process_stars(image, settings, tmp_path, cache=cache)
+    assert cache['glow']['halo'] is not halo
+    assert calls == [12, 36]*3
+    assert set(cache) == {'glow'}
+
+
+@pytest.mark.skipif(not SIRIL.is_file(), reason='Requires installed Siril 1.4+')
+def test_coma_cache_reuses_detection_for_strength(tmp_path, monkeypatch):
+    from backend import star_processing
+    run, calls = star_processing.subprocess.run, []
+    def tracked(*args, **kwargs):
+        calls.append(args[0])
+        return run(*args, **kwargs)
+    monkeypatch.setattr(star_processing.subprocess, 'run', tracked)
+    image, cache = star_image(), {}
+    settings = {'coma': dict(enabled=True, strength=.3, radius=8, sigma=1, roundness=.9)}
+    process_stars(image, settings, tmp_path, cache=cache)
+    correction = cache['coma']['correction']
+    settings['coma']['strength'] = .8
+    cached, _ = process_stars(image, settings, tmp_path, cache=cache)
+    assert len(calls) == 1 and cache['coma']['correction'] is correction
+    fresh, _ = process_stars(image, settings, tmp_path)
+    np.testing.assert_array_equal(cached, fresh)
+    settings['coma']['roundness'] = .8
+    process_stars(image, settings, tmp_path, cache=cache)
+    assert len(calls) == 3 and cache['coma']['correction'] is not correction

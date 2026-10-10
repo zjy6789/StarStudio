@@ -50,12 +50,39 @@ class Setup {
             var config = new Dictionary<string, object> {
                 {"url", "http://127.0.0.1:8765"}, {"token", token},
                 {"launcher", Path.Combine(root, "tools", "StarStudioLauncher.exe")},
-                {"starnet", Path.Combine(root, "engines", "starnet", "starnet++.exe")}
+                {"starnet", Path.Combine(root, "engines", "starnet", "starnet2.exe")}
             };
             File.WriteAllText(configPath, serializer.Serialize(config), new UTF8Encoding(false));
             string ccx = Path.Combine(root, "StarStudio.ccx");
             if (File.Exists(ccx)) File.Delete(ccx);
             ZipFile.CreateFromDirectory(Path.Combine(root, "plugin"), ccx);
+            var manifest = serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(Path.Combine(root, "plugin", "manifest.json")));
+            string installedPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Adobe", "UXP", "Plugins", "External", (string)manifest["id"] + "_" + (string)manifest["version"]);
+            // UPIA can report success without replacing an installed same-version CCX.
+            if (Directory.Exists(installedPath)) {
+                var savedSettings = new Dictionary<string, byte[]>();
+                string storage = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Adobe", "UXP", "PluginsStorage", "PHSP");
+                if (Directory.Exists(storage)) foreach (string host in Directory.GetDirectories(storage)) {
+                    string settings = Path.Combine(host, "External", (string)manifest["id"], "PluginData", "model-settings.json");
+                    if (File.Exists(settings)) savedSettings[settings] = File.ReadAllBytes(settings);
+                }
+                using (Process remove = Process.Start(new ProcessStartInfo {
+                    FileName = InstallerPath(), Arguments = "/remove \"Star Studio\"",
+                    UseShellExecute = false, CreateNoWindow = true,
+                    RedirectStandardOutput = true, RedirectStandardError = true
+                })) {
+                    var output = remove.StandardOutput.ReadToEndAsync();
+                    var error = remove.StandardError.ReadToEndAsync();
+                    remove.WaitForExit();
+                    File.WriteAllText(Path.Combine(root, "artifacts", "refresh.log"), output.Result + error.Result);
+                    if (remove.ExitCode != 0) throw new IOException("Adobe could not refresh the existing Star Studio installation (" + remove.ExitCode + ").");
+                }
+                foreach (var settings in savedSettings) {
+                    Directory.CreateDirectory(Path.GetDirectoryName(settings.Key));
+                    File.WriteAllBytes(settings.Key, settings.Value);
+                }
+            }
             var start = new ProcessStartInfo {
                 FileName = InstallerPath(), Arguments = "/install \"" + ccx + "\"",
                 UseShellExecute = false, CreateNoWindow = true,

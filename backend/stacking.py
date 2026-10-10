@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import time
 import warnings
+from contextlib import ExitStack
 from pathlib import Path
 
 import astroalign
@@ -13,6 +14,7 @@ import sep
 from scipy.spatial import cKDTree
 
 from .stack_io import ordered_paths, read_frame, preview_png, write_result, RAW_EXTENSIONS
+from .calibration import Calibration, selected_paths
 
 MODES = {'mean', 'median', 'sigma', 'maximum', 'minimum'}
 cv2.setNumThreads(min(8, cv2.getNumberOfCPUs()))
@@ -140,11 +142,27 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
     if mode not in MODES:
         raise ValueError('未知堆栈模式。')
     output = Path(request['output']).resolve()
-    format = request.get('format','dng' if Path(files[0]).suffix.lower() in RAW_EXTENSIONS else 'tiff32')
-    if output.suffix.lower() != ('.dng' if format == 'dng' else '.tif'):
+    format = request.get('format','dng')
+    if format not in {'dng','tiff16','tiff32','fits16','fits32'}:
+        raise ValueError('未知保存格式。')
+    suffix = '.dng' if format == 'dng' else '.fit' if format in {'fits16','fits32'} else '.tif'
+    if output.suffix.lower() not in ({'.fit','.fits','.fts'} if suffix == '.fit' else {suffix}):
         raise ValueError('输出扩展名与保存格式不一致。')
-    if str(output) in files:
+    settings = request.get('calibration',{})
+    groups = selected_paths(settings)
+    calibration_files = [p for paths in groups.values() for p in paths]
+    inputs = {p.casefold() for p in files+calibration_files}
+    if {p.casefold() for p in files} & {p.casefold() for p in calibration_files}:
+        raise ValueError('亮场素材不能同时作为校准场，请检查文件选择。')
+    if str(output).casefold() in inputs:
         raise ValueError('输出不能覆盖堆栈素材。')
+    photoshop_output = output
+    if format in {'fits16','fits32'}:
+        photoshop_output = Path(request.get('photoshopOutput',output.with_name(output.stem+'_PS.tif'))).resolve()
+        if photoshop_output.suffix.lower() != '.tif' or not photoshop_output.parent.is_dir():
+            raise ValueError('Photoshop 临时结果需要存在的文件夹与 .tif 扩展名。')
+        if str(photoshop_output).casefold() in inputs or photoshop_output.exists():
+            raise ValueError(f'供 Photoshop 打开的 TIFF 已存在：{photoshop_output}。请使用另一个输出名称。')
     strokes = request.get('mask',[])
     reference_index = len(files)//2
     started = time.monotonic()
@@ -152,10 +170,17 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
     def check():
         if cancelled():
             raise ValueError('堆栈已取消。')
-    with tempfile.TemporaryDirectory(prefix='stack-',dir=scratch) as work:
+    with tempfile.TemporaryDirectory(prefix='stack-',dir=scratch) as work, ExitStack() as resources:
         work = Path(work)
+        calibration = None
+        read = read_frame
+        if calibration_files:
+            calibration = resources.enter_context(Calibration(settings,groups,work,message,progress,cancelled))
+            message('准备传感器校准…')
+            calibration.prepare(files[reference_index])
+            read = calibration.read_frame
         message('读取中间基准帧…')
-        reference, meta = read_frame(files[reference_index])
+        reference, meta = read(files[reference_index])
         shape = reference.shape
         h, w, c = shape
         needed = reference.nbytes*(len(files)+3 if mode in {'median','sigma'} else 5)
@@ -167,7 +192,7 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
             message('识别固定地景特征…')
             for index in {0,len(files)-1}:
                 check()
-                image, _ = read_frame(files[index])
+                image, _ = read(files[index])
                 if image.shape != shape:
                     raise ValueError(f'照片尺寸不一致：{Path(files[index]).name}')
                 catalogs[index] = star_catalog(image,strokes)
@@ -190,7 +215,7 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
             for i, path in enumerate(files):
                 check()
                 message(f'对齐与累积 {i+1}/{len(files)} · {Path(path).name}')
-                image, current_meta = (reference_map,meta) if i == reference_index else read_frame(path)
+                image, current_meta = (reference_map,meta) if i == reference_index else read(path)
                 if image.shape != shape or current_meta['space'] != meta['space']:
                     raise ValueError(f'照片尺寸或颜色空间不一致：{Path(path).name}')
                 if meta['space'] == 'camera' and not np.allclose(current_meta['matrix'],meta['matrix'],rtol=.002,atol=.002):
@@ -222,7 +247,7 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
                         operation = np.maximum if mode == 'maximum' else np.minimum
                         destination = accumulator[y:y+len(block)]
                         operation(destination,block,out=destination,where=valid[...,None])
-                    progress(.05+.75*(i+(y+len(block))/h)/len(files))
+                    progress(.15+.65*(i+(y+len(block))/h)/len(files))
                 if aligned is not None:
                     aligned.flush()
                     aligned._mmap.close()
@@ -253,12 +278,19 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
                     progress(.8+.1*(y+rows)/h)
                 message('保存堆栈结果…')
                 check()
-                encoding = write_result(output,result,meta,format)
+                calibration_info = calibration.summary() if calibration else None
+                encoding = write_result(output,result,meta,format,calibration=calibration_info)
+                if format in {'fits16','fits32'}:
+                    # Native Photoshop does not read FITS. Preserve the requested
+                    # astronomical file and open a full float32 temporary TIFF.
+                    check()
+                    write_result(photoshop_output,result,meta,'tiff32')
                 summary = {'output':str(output),'reference':files[reference_index],'frames':len(files),'mode':mode,
                            'format':format,'shape':list(shape),'seconds':round(time.monotonic()-started,2),
                            'fixedFeatures':len(fixed),'coverageMin':int(count.min()),'coverageMax':int(count.max()),
                            'encoding':encoding,'alignment':records,'color':meta,
-                           'resampling':'Lanczos4 once; reference is not resampled'}
+                           'resampling':'Lanczos4 once; reference is not resampled',
+                           'photoshopOutput':str(photoshop_output),'calibration':calibration_info}
                 output.with_suffix(output.suffix+'.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
                 progress(1)
                 return summary

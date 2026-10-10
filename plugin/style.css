@@ -10,7 +10,8 @@ section { margin:8px 0; padding:10px; border:1px solid #505050; border-radius:6p
 .page { display:none; } .page.active { display:flex; flex-direction:column; }
 .collapsed { display:none; } .collapsed.expanded { display:flex; flex-direction:column; padding:10px; border:1px solid #505050; }
 #modelSettings label { display:block; margin:8px 0 3px; }
-#executable { width:100%; }
+#executable { min-width:0; }
+.licenseText { max-height:220px; overflow:auto; white-space:pre-wrap; font-size:11px; }
 .disclosure { width:100%; height:32px; margin:14px 0 6px; text-align:left; }
 .execute { width:100%; height:36px; margin-top:12px; }
 .hint { color:#aaa; margin-top:8px; }
@@ -44,6 +45,11 @@ footer { padding:5px; } progress { width:100%; height:8px; }
 #stackMask { cursor:crosshair; }
 #stackBrush { flex:1; min-width:60px; margin:0; }
 #stackCache { margin-top:8px; }
+.calibrationRow { display:flex; align-items:center; flex-wrap:wrap; margin:4px 0; }
+.calibrationRow > * { margin-right:7px; }
+.calibrationRow label { width:48px; }
+.calibrationRow .muted { flex:1; min-width:50px; }
+#stackLinearTiffLabel { margin-top:10px; }
 #stackExecute { flex:1; width:auto; }
 .processTool { border:1px solid #505050; border-radius:4px; margin-top:7px; }
 .processToolHeader { display:flex; align-items:center; padding:4px 7px; }

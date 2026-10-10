@@ -1,0 +1,3 @@
+-r requirements.txt
+# Independent reference for the tiled float demosaicer; not a runtime dependency.
+colour-demosaicing==0.2.6

@@ -13,8 +13,10 @@ const tools=[
     ['strength','发光强度',0,5,.05,1],['radius','光晕半径（原图像素）',.5,120,.5,12],['lower','发光亮度下限',0,1,.01,.2],['upper','发光亮度上限',0,1,.01,1],['softness','阈值过渡宽度',.001,.5,.001,.1],['spread','外晕比例',0,1,.01,.35]]]
 ];
 
-function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,currentPage}) {
-  let meta=null, last=null, timer=null, previewID=null, canvasEnabled=false;
+function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,currentPage,
+  refreshBlendModes=()=>{},ensureService=async()=>{},isBusy=()=>false,isUpdatingPickers=()=>false}) {
+  let meta=null,last=null,desired=null,timer=null,previewState=null,worker=null,jobID=null;
+  let paused=false,modalBusy=false,compositionVersion=0,compositionKey=null,nativeQueue=Promise.resolve(),failedKey=null,runningKey=null;
   function settings() {
     const result={};
     for(const [name,,,specs] of tools) {
@@ -27,9 +29,65 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
     const points=values.map((v,i)=>(i*300/(values.length-1)).toFixed(2)+','+(75-v*75).toFixed(2)).join(' ');
     $('processCurve').src='data:image/svg+xml;base64,'+btoa('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="75"><path d="M0 75L300 0" stroke="#555"/><polyline points="'+points+'" fill="none" stroke="#8fd2ff" stroke-width="2"/></svg>');
   }
+  function native(action) {
+    const work=nativeQueue.then(async()=>{
+      modalBusy=true;
+      try {return await action();} finally {modalBusy=false;}
+    });
+    nativeQueue=work.catch(()=>{});return work;
+  }
+  const remove=key=>key?api('/images/'+key,undefined,false,'DELETE').catch(()=>{}):Promise.resolve();
+  function selection() {
+    const {doc,layer}=selectedLayer('processSource');
+    refreshBlendModes();
+    const sourceKey=doc.id+':'+layer.id+':'+doc.activeHistoryState.id;
+    const size=doc.bitsPerChannel===host.constants.BitsPerChannelType.EIGHT?8:doc.bitsPerChannel===host.constants.BitsPerChannelType.SIXTEEN?16:32;
+    const info={docID:doc.id,layerID:layer.id,name:layer.name,width:doc.width,height:doc.height,
+      size,components:doc.mode===host.constants.DocumentMode.RGB?4:2,sourceKey,starEncoding:host.starEncoding(doc,layer)};
+    const options=settings(),key=sourceKey+':'+info.starEncoding+':'+JSON.stringify(options);
+    return {doc,layer,info,options,key,enabled:Object.values(options).some(x=>x.enabled)};
+  }
+  function background() {
+    if(value('processBackground')==null) return null;
+    const selected=selectedLayer('processBackground');
+    if(selected.layer.id===value('processSource')) throw new Error('背景与星点请选择不同图层。');
+    return {...selected,key:selected.doc.activeHistoryState.id};
+  }
+  function compose() {
+    if(paused || isBusy() || !desired || currentPage()!=='process') return Promise.resolve();
+    const selected=desired,original=$('processOriginal').checked;
+    const result=original || !selected.enabled?null:last?.sourceKey===selected.info.sourceKey?
+      {...last.result,width:selected.info.width,height:selected.info.height,components:selected.info.components}:null;
+    let backdrop;
+    try {backdrop=background();} catch(e) {status(e.message,true);return Promise.resolve();}
+    const blend=value('processBlend'),key=JSON.stringify([selected.info.sourceKey,result?.image,backdrop?.layer.id,backdrop?.key,blend]);
+    if(key===compositionKey) return nativeQueue;
+    compositionKey=key;
+    const version=++compositionVersion;
+    return native(async()=>{
+      if(version!==compositionVersion || paused) return;
+      try {
+        previewState=await host.canvasStarPreview(previewState,result,meta?.sourceKey===selected.info.sourceKey?meta:selected.info,
+          backdrop,blend,api,report,()=>version===compositionVersion && !paused);
+      } catch(e) {
+        if(version===compositionVersion) compositionKey=null;
+        if(!e.stale && version===compositionVersion && !paused) status(e.message || String(e),true);
+      }
+    });
+  }
+  function cancel() {if(jobID) api('/jobs/'+jobID,undefined,false,'DELETE').catch(()=>{});}
   function schedule() {
     clearTimeout(timer);
-    if(currentPage()==='process' && value('processSource')!=null) timer=setTimeout(()=>run(preview),500);
+    if(isUpdatingPickers() || paused || isBusy() || currentPage()!=='process') return;
+    try {
+      const next=value('processSource')==null?null:selection();
+      if(next?.key!==desired?.key) {desired=next;failedKey=null;cancel();}
+      else desired=next;
+      compose();updateActions();
+      if(desired && (desired.enabled && last?.key!==desired.key || !desired.enabled && (meta || last)))
+        if(desired.key!==failedKey) timer=setTimeout(startWorker,180);
+      if(!desired && (meta || last || previewState)) timer=setTimeout(startWorker,180);
+    } catch(e) {status(e.message || String(e),true);}
   }
   function reset() {
     for(const [name,,,specs] of tools) {
@@ -69,67 +127,117 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
       schedule();
     });
   }
-  function invalidate() {
-    clearTimeout(timer);
-    for(const key of [meta?.id,last?.image]) if(key) api('/images/'+key,undefined,false,'DELETE').catch(()=>{});
-    meta=null;last=null;$('processPreview').removeAttribute('src');updateActions();
-  }
   function updateActions(busy=false) {
     const selected=value('processSource')!=null;
     $('processExecute').disabled=busy || !selected;
-    $('processPreviewButton').disabled=busy || !selected;
-    $('processOriginal').disabled=busy || !last;
-    $('processCanvas').disabled=busy || (!last && !canvasEnabled);
-    if(previewID && !host.app.documents.some(d=>d.id===previewID)) {
-      previewID=null;canvasEnabled=false;$('processCanvas').textContent='在 Photoshop 中预览';
-    }
+    $('processOriginal').disabled=busy || !selected;
+    $('processBlend').disabled=busy || desired?.info.starEncoding==='gray';
+    if(previewState && !host.app.documents.some(d=>d.id===previewState.docID)) {previewState=null;compositionKey=null;}
   }
-  async function display() {
-    if(!last) return;
-    const original=$('processOriginal').checked;
-    $('processPreview').src=original?meta.original:last.preview;
-    if(canvasEnabled) previewID=await host.canvasPreview(previewID,{id:original?meta.id:last.image,width:meta.width,height:meta.height,components:meta.components},meta,api,report,'星点加工');
+  async function clearImages() {
+    await nativeQueue;
+    await remove(last?.result.image);await remove(meta?.id);last=null;meta=null;
   }
-  async function preview() {
-    const {doc,layer}=selectedLayer('processSource');
-    if(meta && (meta.docID!==doc.id || meta.layerID!==layer.id)) invalidate();
-    if(!meta) {
-      status('正在读取星点快速预览…');
-      meta=await host.core.executeAsModal(()=>host.uploadPreview(doc,layer,api),{commandName:'读取星点加工预览'});
-      const original=await job({op:'processStars',image:meta.id,settings:{},preview:true});
-      meta.original=original.preview;await api('/images/'+original.image,undefined,false,'DELETE');
-    }
-    const result=await job({op:'processStars',image:meta.id,settings:settings(),preview:true,scale:meta.width/doc.width});
-    if(last) await api('/images/'+last.image,undefined,false,'DELETE');
-    last=result;await display();curvePlot(result.curve);updateActions();
-    status('星点预览已更新。'+(result.reconstructedStars?' 重建 '+result.reconstructedStars+' 个星点。':''));
-  }
-  $('processSource').addEventListener('change',()=>{invalidate();schedule();});
-  $('processUseActive').addEventListener('click',()=>run(async()=>{useActive('processSource');invalidate();await preview();}));
-  $('processPreviewButton').addEventListener('click',()=>run(preview));
-  $('processOriginal').addEventListener('change',()=>run(display));
-  $('processReset').addEventListener('click',reset);
-  $('processCanvas').addEventListener('click',()=>run(async()=>{
-    canvasEnabled=!canvasEnabled;
-    if(canvasEnabled) await display();
-    else {const doc=host.app.documents.find(d=>d.id===previewID);if(doc) await host.core.executeAsModal(()=>doc.closeWithoutSaving(),{commandName:'关闭星点加工预览'});previewID=null;}
-    $('processCanvas').textContent=canvasEnabled?'关闭 Photoshop 预览':'在 Photoshop 中预览';
-  }));
-  $('processExecute').addEventListener('click',()=>run(async()=>{
-    const {doc,layer}=selectedLayer('processSource');
-    const full=await host.core.executeAsModal(()=>host.upload(doc,layer,api,report),{commandName:'读取完整星点图层'});
-    let result;
+  async function process(request,key) {
+    const created=await api('/jobs',request);jobID=created.id;
+    if(paused || desired?.key!==key) cancel();
     try {
-      result=await job({op:'processStars',image:full.id,settings:settings()});
-      const output=await host.transaction(doc,'星点加工',context=>host.write(doc,result.image,full,layer.name+'_processed',api,report,context));
-      refresh();status('已创建 '+output.name+'。请在重混合页选择该图层。'+(result.reconstructedStars?' 重建 '+result.reconstructedStars+' 个星点。':''));
+      while(true) {
+        const state=await api('/jobs/'+created.id);
+        if(state.state==='done') return state.result;
+        if(state.state==='canceled') return null;
+        if(state.state==='error') throw new Error(state.error);
+        if(!paused && desired) {report(state.progress);status(state.message || '正在更新全分辨率预览…');}
+        await new Promise(resolve=>setTimeout(resolve,150));
+      }
+    } finally {jobID=null;}
+  }
+  function startWorker() {
+    if(worker || paused || isBusy()) return;
+    worker=render().catch(e=>{failedKey=runningKey;if(desired?.key===runningKey) status(e.message || String(e),true);}).finally(()=>{
+      worker=null;
+      if(!paused && currentPage()==='process' && desired?.enabled && last?.key!==desired.key && desired.key!==failedKey) timer=setTimeout(startWorker,180);
+    });
+  }
+  async function render() {
+    while(!paused && currentPage()==='process' && desired) {
+      const target=desired;
+      runningKey=target.key;
+      if(!target.enabled) {await clearImages();return;}
+      if(last?.key===target.key) return;
+      await ensureService();
+      if(paused || desired?.key!==target.key) continue;
+      if(meta?.sourceKey!==target.info.sourceKey) {
+        await clearImages();
+        status('正在读取完整星点图层…');
+        meta=await native(()=>host.core.executeAsModal(()=>host.upload(target.doc,target.layer,api,report),{commandName:'读取完整星点图层'}));
+        meta.sourceKey=target.info.sourceKey;
+      }
+      if(paused || desired?.key!==target.key) continue;
+      const result=await process({op:'processStars',image:meta.id,settings:target.options,preview:false,scale:1,starEncoding:target.info.starEncoding},target.key);
+      if(!result) continue;
+      if(paused || desired?.key!==target.key) {await remove(result.image);continue;}
+      const previous=last;
+      last={key:target.key,sourceKey:target.info.sourceKey,result};
+      await compose();await remove(previous?.result.image);
+      curvePlot(result.curve);status('全分辨率预览已更新。'+(result.reconstructedStars?' 重建 '+result.reconstructedStars+' 个星点。':''));
+      return;
+    }
+    if(!desired) {
+      await clearImages();
+      await native(async()=>{
+        if(desired || !previewState) return;
+        const doc=host.app.documents.find(d=>d.id===previewState.docID);
+        if(doc) await host.core.executeAsModal(()=>doc.closeWithoutSaving(),{commandName:'关闭星点加工预览'});
+        previewState=null;compositionKey=null;
+      });
+    }
+  }
+  for(const id of ['processSource','processBackground','processBlend']) $(id).addEventListener('change',schedule);
+  for(const [button,picker] of [['processUseActive','processSource'],['processBackgroundUseActive','processBackground']])
+    $(button).addEventListener('click',()=>{
+      try {useActive(picker);schedule();} catch(e) {status(e.message,true);}
+    });
+  $('processOriginal').addEventListener('change',compose);
+  $('processReset').addEventListener('click',reset);
+  $('processExecute').addEventListener('click',()=>run(async()=>{
+    const target=selection(),blend=value('processBlend');
+    let output,result,temporary=false;
+    try {
+      if(target.enabled) {
+        if(meta?.sourceKey!==target.info.sourceKey) {
+          await clearImages();
+          meta=await native(()=>host.core.executeAsModal(()=>host.upload(target.doc,target.layer,api,report),{commandName:'读取完整星点图层'}));
+          meta.sourceKey=target.info.sourceKey;
+        }
+        result=last?.key===target.key?last.result:await job({op:'processStars',image:meta.id,settings:target.options,preview:false,scale:1,starEncoding:target.info.starEncoding});
+        temporary=result!==last?.result;
+      }
+      const backdrop=background();
+      output=await native(()=>host.transaction(target.doc,'星点加工',async context=>{
+        const layer=result?await host.write(target.doc,result.image,meta,target.layer.name+'_processed',api,report,context):await target.layer.duplicate(target.doc);
+        if(layer.allLocked) layer.allLocked=false;
+        layer.name=target.layer.name+'_processed';layer.visible=true;
+        host.setStarBlendMode(layer,blend,target.doc);
+        if(backdrop) layer.move(backdrop.layer,host.constants.ElementPlacement.PLACEBEFORE);
+        return layer;
+      }));
+      // Writing a separate output changes source history, but not input pixels.
+      const revised=selection();
+      if(meta) meta.sourceKey=revised.info.sourceKey;
+      if(temporary) {await remove(last?.result.image);last={key:revised.key,sourceKey:revised.info.sourceKey,result};temporary=false;}
+      else if(last) {last.key=revised.key;last.sourceKey=revised.info.sourceKey;}
+      desired=revised;refresh();
+      status('已创建 '+output.name+'，混合模式与预览一致。'+(result?.reconstructedStars?' 重建 '+result.reconstructedStars+' 个星点。':''));
     } finally {
-      for(const key of [full.id,result?.image]) if(key) await api('/images/'+key,undefined,false,'DELETE');
+      if(temporary) await remove(result?.image);
     }
   }));
   reset();updateActions();
-  return {updateActions,previewDocumentID:()=>previewID,sync(next,old){
-    if(meta && (!next || next.id!==meta.docID || old?.history!==next.history || value('processSource')!==meta.layerID)) {invalidate();schedule();}
-  }};
+  return {updateActions,previewDocumentID:()=>previewState?.docID,isModalBusy:()=>modalBusy,
+    pageChanged(){if(currentPage()!=='process'){clearTimeout(timer);++compositionVersion;compositionKey=null;cancel();}else schedule();},
+    sync(next,old){if(next?.id!==old?.id || next?.history!==old?.history) schedule();},
+    async pause(){paused=true;clearTimeout(timer);++compositionVersion;compositionKey=null;cancel();await worker;await nativeQueue;},
+    resume(){paused=false;schedule();}};
 }
 module.exports={setup};
