@@ -2,11 +2,21 @@
 <html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head>
 <body>
 <header><div id="documentName" class="muted">未打开照片</div><div id="status">正在准备…</div><progress id="progress" max="1" value="0"></progress></header>
+<button id="startOptions" class="disclosure" aria-expanded="true">开始与照片状态 ▴</button>
+<div id="startSettings" class="collapsed expanded">
+  <div class="row"><button id="startCurrent" class="primary">处理当前照片</button><button id="startStack">从多张原片开始</button></div>
+  <div id="inputHint" class="hint">打开一张照片，或从多张原片堆栈开始。</div>
+  <div class="row"><label>照片阶段</label><sp-picker id="photoStage"><sp-menu><sp-menu-item>尚未确认</sp-menu-item><sp-menu-item>已显影照片</sp-menu-item><sp-menu-item>线性堆栈母版</sp-menu-item></sp-menu></sp-picker></div>
+  <div class="hint">阶段由你确认，不按位深猜测，也不会修改像素。去星前请先将线性母版显影为独立副本。</div>
+  <div class="row"><label>拍摄场景</label><sp-picker id="photoScene"><sp-menu><sp-menu-item>银河 / 带地景</sp-menu-item><sp-menu-item>深空</sp-menu-item></sp-menu></sp-picker></div>
+  <div id="sceneHint" class="muted"></div>
+</div>
 <div class="tabs" role="tablist"><button id="stackTab" class="tab selected" role="tab" aria-selected="true">堆栈</button><button id="separateTab" class="tab" role="tab" aria-selected="false">星点分离</button><button id="processTab" class="tab" role="tab" aria-selected="false">星点加工</button></div>
 <section id="separatePage" class="page" role="tabpanel">
   <label>源图层</label><sp-picker id="source" placeholder="选择源图层"><sp-menu></sp-menu></sp-picker>
   <div class="hint">默认使用当前图层，分离后保留原图层。</div>
   <button id="modelOptions" class="disclosure">星点提取模型：StarNet ▾</button>
+  <div id="modelState" class="hint">StarNet 待检查；未配置也可堆栈或加工已有星点层。</div>
   <div id="modelSettings" class="collapsed">
     <label>StarNet 程序位置</label><div class="row"><input id="executable" type="text" placeholder="选择 starnet2.exe 或 CPU 版 starnet++.exe"><button id="chooseExecutable">选择程序…</button></div>
     <div class="hint">自动识别所选程序。新版 StarNet2 优先使用 GPU，不可用时回退 CPU；也可选择旧版 CPU 引擎。请完整解压官方 CLI 包。</div>
@@ -46,10 +56,10 @@
     <label id="stackLinearTiffLabel"><input id="stackLinearTiff" type="checkbox"> TIFF 已线性显影并去除黑电平</label>
     <div class="hint">校准支持原始 Bayer RAW 或上述线性 16/32 位 TIFF；JPEG、PNG、已去马赛克的 DNG 和 X-Trans RAW 暂不支持校准。未选择校准场时不受此限制。</div>
   </div>
-  <div class="row stackSettings"><div><label>堆栈模式</label><sp-picker id="stackMode"><sp-menu><sp-menu-item>均值（降噪推荐）</sp-menu-item><sp-menu-item>中位数</sp-menu-item><sp-menu-item>Sigma 裁剪均值</sp-menu-item><sp-menu-item>最大值</sp-menu-item><sp-menu-item>最小值</sp-menu-item></sp-menu></sp-picker></div><div><label>对齐场景</label><sp-picker id="stackScene"><sp-menu><sp-menu-item>纯星空</sp-menu-item><sp-menu-item>星空与固定地景</sp-menu-item></sp-menu></sp-picker></div></div>
+  <div class="row stackSettings"><div><label>堆栈模式</label><sp-picker id="stackMode"><sp-menu><sp-menu-item>均值（降噪推荐）</sp-menu-item><sp-menu-item>中位数</sp-menu-item><sp-menu-item>Sigma 裁剪均值</sp-menu-item><sp-menu-item>最大值</sp-menu-item><sp-menu-item>最小值</sp-menu-item></sp-menu></sp-picker></div><div><label>对齐场景</label><sp-picker id="stackScene"><sp-menu><sp-menu-item>纯星空</sp-menu-item><sp-menu-item>仅对齐天空（排除固定地景特征）</sp-menu-item></sp-menu></sp-picker></div></div>
   <div id="stackMaskEditor"><img id="stackReference"><img id="stackMask"></div>
   <div class="row"><label><input type="checkbox" id="stackPaint"> 画笔排除对齐区域</label><span>笔刷</span><input id="stackBrush" type="range" min="10" max="160" value="60"><button id="stackClearMask">清除蒙版</button></div>
-  <div class="hint">红色蒙版仅排除对齐特征，不删除像素。地景仍参与堆栈，可能拖花。</div>
+  <div class="hint">地景模式和红色蒙版仅排除对齐特征，不删除像素，也不保留清晰地景。整张照片随天空对齐，地景可能拖花。</div>
   <div class="row stackSettings"><div><label>保存格式</label><sp-picker id="stackFormat"><sp-menu><sp-menu-item>DNG（32 位线性浮点，默认）</sp-menu-item><sp-menu-item>16 位 TIFF</sp-menu-item><sp-menu-item>32 位浮点 TIFF</sp-menu-item><sp-menu-item>16 位 FITS（缩放整数）</sp-menu-item><sp-menu-item>32 位浮点 FITS</sp-menu-item></sp-menu></sp-picker></div></div>
   <div id="stackFormatHint" class="hint">DNG 保留 32 位浮点；Photoshop 打开位深由 Camera Raw 设置决定。</div>
   <div id="stackCache" class="muted"></div>

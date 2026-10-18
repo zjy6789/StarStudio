@@ -21,7 +21,7 @@ function panel(options={}) {
   const doc={id:7,width:6000,height:4000,bitsPerChannel:16,title:'Test',layers:[layer],activeLayers:[layer],activeHistoryState:{id:1}};
   const h={get,calls,doc,healthFailures:options.healthFailures||0,online:options.online!==false,
     launchError:options.launchError||'',chosenFile:null,fileGate:null,previewID:null,modalBusy:false};
-  const host={app:{documents:[doc],activeDocument:doc},constants:{BlendMode:{LINEARDODGE:'linearDodge'}},
+  const host={app:{documents:options.noDocument?[]:[doc],activeDocument:options.noDocument?null:doc},constants:{BlendMode:{LINEARDODGE:'linearDodge'}},
     documentInfo:doc=>doc,layers:doc=>doc.layers.map(layer=>({id:layer.id,name:layer.name,layer})),
     starEncoding:()=> 'black',starBlendModes:()=>['normal','lighten','screen','linearDodge']};
   h.host=host;
@@ -40,10 +40,11 @@ function panel(options={}) {
       addEventListener:(name,action)=>events.set(name,action)},
     setInterval:(action,delay)=>{intervals.set(delay,action);return delay;},
     setTimeout:(action,delay)=>{timeouts.set(delay,action);return delay;},
-    fetch:async(url,options)=>{
+    fetch:async(url,requestOptions)=>{
       const route=new URL(url).pathname;
-      calls.requests.push({route,options:plain(options)});
+      calls.requests.push({route,options:plain(requestOptions)});
       if(route==='/health' && (!h.online || h.healthFailures-->0))throw new Error('connection refused');
+      if(route==='/starnet-info' && options.modelError)throw new Error(options.modelError);
       const data=route==='/starnet-info'?{modern:true,license:'Terms',license_sha256:'revision-1'}:{ok:true,version:'0.6.0'};
       return {ok:true,json:async()=>data};
     },
@@ -85,7 +86,50 @@ test('the full panel starts on stack, restores model settings, and leaves star/b
     }
   }
   assert.equal(h.calls.pages,3);
-  assert.ok(h.calls.requests.every(request=>request.route==='/health'));
+  assert.ok(h.calls.requests.every(request=>['/health','/starnet-info'].includes(request.route)));
+});
+
+test('start guidance offers a current-photo path without forcing a stack and works without a document',async()=>{
+  const h=panel({noDocument:true,saved:{executable:'',stride:0,decomposition:0}});await h.settle();
+  assert.equal(h.get('startCurrent').disabled,true);assert.equal(h.get('photoStage').disabled,true);
+  assert.match(h.get('inputHint').textContent,/尚未打开照片/);
+  await h.emit('startStack');assert.equal(h.get('stackPage').classList.contains('active'),true);
+  h.host.app.documents=[h.doc];h.host.app.activeDocument=h.doc;await h.tick(800);
+  assert.equal(h.get('startCurrent').disabled,false);await h.emit('startCurrent');
+  assert.equal(h.get('separatePage').classList.contains('active'),true);
+  assert.equal(h.get('photoStage').selectedIndex,0);
+  await h.emit('startOptions');assert.equal(h.get('startSettings').classList.contains('expanded'),false);
+  await h.emit('startOptions');assert.equal(h.get('startSettings').classList.contains('expanded'),true);
+});
+
+test('stage confirmation belongs to the source document and is never inferred from bit depth or a preview',async()=>{
+  const h=panel();await h.settle();h.get('photoStage').selectedIndex=1;await h.emit('photoStage','change');
+  const other={...h.doc,id:8,title:'Linear master',bitsPerChannel:32};h.host.app.documents.push(other);h.host.app.activeDocument=other;
+  await h.tick(800);assert.equal(h.get('photoStage').selectedIndex,0);
+  h.get('photoStage').selectedIndex=2;await h.emit('photoStage','change');
+  h.previewID=90;h.host.app.documents.push({id:90});h.host.app.activeDocument={id:90};await h.tick(800);
+  assert.equal(h.get('photoStage').selectedIndex,2);assert.match(h.get('inputHint').textContent,/来源：Linear master.*加工预览/);
+  h.host.app.activeDocument=h.doc;await h.tick(800);assert.equal(h.get('photoStage').selectedIndex,1);
+});
+
+test('unconfirmed and linear inputs stop extraction before image upload with concrete next steps',async()=>{
+  const h=panel({saved:{executable:'D:\\engine\\starnet2.exe',acceptedLicenses:['revision-1']}});await h.settle();
+  await h.emit('extract');assert.match(h.get('status').textContent,/照片阶段.*已显影/);
+  h.get('photoStage').selectedIndex=2;await h.emit('photoStage','change');await h.emit('extract');
+  assert.match(h.get('status').textContent,/保留母版.*副本/);
+  assert.ok(h.calls.requests.every(request=>['/health','/starnet-info'].includes(request.route)));
+  assert.equal(h.get('extract').disabled,false);
+});
+
+test('optional engine failures explain the next step without blocking stack or existing stars',async()=>{
+  const h=panel({modelError:'找不到 StarNet'});await h.settle();
+  assert.match(h.get('modelState').textContent,/无法就绪.*其他工具仍可使用/);
+  await h.emit('startStack');assert.equal(h.get('stackPage').classList.contains('active'),true);
+  await h.emit('processTab');assert.equal(h.get('processPage').classList.contains('active'),true);
+  assert.equal(h.get('stackFiles').disabled,false);
+  h.get('executable').value='';await h.emit('executable','change');assert.match(h.get('modelState').textContent,/未配置/);
+  h.get('photoScene').selectedIndex=1;await h.emit('photoScene','change');await h.settle();
+  assert.equal(h.calls.writes.at(-1).photoScene,1);assert.match(h.get('sceneHint').textContent,/保留线性母版/);
 });
 
 test('model controls save their state, clear stale license UI, and persist the explicitly accepted license',async()=>{

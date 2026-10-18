@@ -34,6 +34,7 @@ for(const size of [8,16,32]) for(const preserve of [false,true]) {
       require:name=>name==='./host.js'?host:{url:'http://127.0.0.1:8765',token:'test'}};
     const code=fs.readFileSync('plugin/main.js','utf8');
     vm.runInNewContext(code.slice(0,code.indexOf("\nfor (const id of ['decomposition','stride'])"))+"\nmodule.exports={extract,refresh};",context);
+    vm.runInNewContext("photoStages.set(7,'developed');",context);
     context.module.exports.refresh();await context.module.exports.extract();
     assert.equal(requests.length,1);
     assert.equal(requests[0].preserveModelBackground,preserve);

@@ -9,6 +9,37 @@ let modelInfo=null, acceptedLicenses=[];
 let stackUI=null, processUI=null;
 const pickerValues = {};
 let blendSourceKey=null;
+const photoStages=new Map();
+const stages=['unknown','developed','linear'];
+
+function inputState() {
+  const doc=host.app.documents.find(d=>d.id===docID);
+  $('startCurrent').disabled=busy || !doc;
+  $('photoStage').disabled=busy || !doc;
+  $('photoStage').selectedIndex=Math.max(0,stages.indexOf(photoStages.get(docID) || 'unknown'));
+  $('inputHint').textContent=doc
+    ? '来源：'+doc.title+'。'+(isPreview(host.app.activeDocument?.id)?'当前查看加工预览，处理仍使用这张源照片。':'去星前请确认照片阶段；已有星点可在加工页手动选择。')
+    : '尚未打开照片。可先在 Photoshop 打开已显影照片，或从多张原片堆栈开始。';
+  $('sceneHint').textContent=$('photoScene').selectedIndex===1
+    ? '保留线性母版；去星前先在副本完成显影。已有星点和无星背景可直接手动带入加工。'
+    : '天空对齐不保护地景清晰度；地景精修仍可使用 Photoshop 蒙版。';
+}
+function modelState(error='') {
+  $('modelState').textContent=!modelExecutable()?'StarNet 未配置；仍可堆栈和加工已有星点层。'
+    : error?'StarNet 无法就绪：'+error+'。请完整解压官方 CLI 并重新选择程序；其他工具仍可使用。'
+    : !modelInfo?'StarNet 尚未检查；选择程序后自动检查。'
+    : modelInfo.modern&&!acceptedLicenses.includes(modelInfo.license_sha256)?'StarNet 程序已找到，许可待确认。展开模型设置，查看并同意许可。'
+    : 'StarNet 程序与许可已就绪；模型及设备将在实际执行时由引擎检查。';
+}
+async function checkModel() {
+  const executable=modelExecutable();modelInfo=null;modelState();
+  if(!executable) return;
+  try {
+    const info=await api('/starnet-info',{executable});
+    if(modelExecutable()!==executable) return;
+    modelInfo=info;modelState();
+  } catch(e) {if(modelExecutable()===executable) modelState(e.message);}
+}
 
 function status(message, error=false) { $('status').textContent=message; $('status').className=error?'error':''; }
 function report(x) { $('progress').value=x; }
@@ -64,6 +95,7 @@ function refresh(followActive=false) {
   }
   refreshBlendModes(doc);
   $('documentName').textContent=doc.title+' · '+doc.width+' × '+doc.height;
+  inputState();
 }
 function refreshBlendModes(doc) {
   const source=host.layers(doc).find(x=>x.id===value('processSource'))?.layer;
@@ -88,6 +120,7 @@ function snapshot() {
     active:doc.activeLayers.map(x=>x.id).join(','), width:doc.width, height:doc.height};
 }
 function updateActions() {
+  inputState();
   $('extract').disabled=busy || !layerList.length;
   $('decomposition').disabled=busy || $('preserveModelBackground').checked;
   if(stackUI) stackUI.updateActions(busy);
@@ -97,7 +130,7 @@ function syncLayers() {
   if (busy || processUI?.isModalBusy()) return;
   try {
     const next=snapshot(), old=documentSnapshot;
-    if (JSON.stringify(next)===JSON.stringify(old)) return;
+    if (JSON.stringify(next)===JSON.stringify(old)) {inputState();return;}
     documentSnapshot=next;
     if (!next) {
       docID=null; layerList=[];
@@ -156,6 +189,7 @@ async function restoreModelSettings() {
       acceptedLicenses=settings.acceptedLicenses || [];
       for(const id of ['stride','decomposition']) $(id).selectedIndex=settings[id];
       $('preserveModelBackground').checked=settings.preserveModelBackground===true;
+      $('photoScene').selectedIndex=settings.photoScene===1?1:0;
     } else await saveModelSettings();
   } else {
     settingsFile=await folder.createFile('model-settings.json');
@@ -164,6 +198,7 @@ async function restoreModelSettings() {
 }
 function saveModelSettings() {
   const settings={executable:$('executable').value,acceptedLicenses};
+  settings.photoScene=$('photoScene').selectedIndex;
   for(const id of ['stride','decomposition']) settings[id]=value(id);
   settings.preserveModelBackground=$('preserveModelBackground').checked;
   settingsWrite=settingsWrite.then(()=>settingsFile.write(JSON.stringify(settings))).catch(e=>status('模型设置保存失败：'+e.message,true));
@@ -178,6 +213,7 @@ async function readModelLicense() {
   $('acceptModelLicense').checked=acceptedLicenses.includes(modelInfo.license_sha256);
   $('acceptModelLicense').parentElement.style.display=modelInfo.modern?'block':'none';
   $('modelLicense').classList.add('expanded');
+  modelState();
   return modelInfo;
 }
 async function job(request, started=()=>{}) {
@@ -215,6 +251,13 @@ async function extract() {
   if(!modelInfo.modern && stride===384) throw new Error('384 步长需要新版 StarNet2；使用旧版 CPU 引擎时请选择 256、128 或 64。');
   const started=Date.now();
   const {doc,layer}=selectedLayer('source');
+  const stage=photoStages.get(doc.id) || 'unknown';
+  if(stage!=='developed') {
+    $('startSettings').classList.add('expanded');
+    throw new Error(stage==='linear'
+      ? '当前是线性堆栈母版。请保留母版，在 Camera Raw / Photoshop 的副本中完成显影后，确认「已显影照片」再去星。'
+      : '请先在「照片阶段」确认这是已显影照片。不能仅凭 16/32 位判断线性；确认不会修改照片像素。');
+  }
   status('读取源图层…');
   const meta=await host.core.executeAsModal(()=>host.upload(doc,layer,api,report),{commandName:'读取源图层'});
   const readSeconds=(Date.now()-started)/1000;
@@ -247,6 +290,20 @@ async function extract() {
   console.log('星点分离耗时',JSON.stringify({...timings,uploadSeconds:readSeconds,writeSeconds:(Date.now()-writeStarted)/1000,totalSeconds:(Date.now()-started)/1000}));
 }
 for (const id of ['decomposition','stride']) $(id).selectedIndex=0;
+$('photoStage').selectedIndex=0;$('photoScene').selectedIndex=0;
+$('startOptions').addEventListener('click',()=>{
+  const expanded=!$('startSettings').classList.contains('expanded');
+  $('startSettings').classList.toggle('expanded',expanded);
+  $('startOptions').setAttribute('aria-expanded',String(expanded));
+  $('startOptions').textContent='开始与照片状态 '+(expanded?'▴':'▾');
+});
+$('startCurrent').addEventListener('click',()=>showPage('separate'));
+$('startStack').addEventListener('click',()=>showPage('stack'));
+$('photoStage').addEventListener('change',()=>{
+  if(docID!=null) photoStages.set(docID,stages[$('photoStage').selectedIndex] || 'unknown');
+  inputState();
+});
+$('photoScene').addEventListener('change',()=>{inputState();if(settingsFile) saveModelSettings();});
 $('executable').value=config.starnet || '';
 for (const page of ['stack','separate','process']) $(page+'Tab').addEventListener('click',()=>showPage(page));
 $('modelOptions').addEventListener('click',()=>$('modelSettings').classList.toggle('expanded'));
@@ -254,6 +311,7 @@ for(const id of ['stride','decomposition','executable']) $(id).addEventListener(
 $('preserveModelBackground').addEventListener('change',()=>{updateActions();if(settingsFile) saveModelSettings();});
 $('executable').addEventListener('change',()=>{
   modelInfo=null; $('modelLicense').classList.remove('expanded');
+  checkModel();
 });
 $('chooseExecutable').addEventListener('click',()=>run(async()=>{
   const file=await require('uxp').storage.localFileSystem.getFileForOpening({types:['exe']});
@@ -261,12 +319,14 @@ $('chooseExecutable').addEventListener('click',()=>run(async()=>{
   $('executable').value=file.nativePath;
   modelInfo=null; $('modelLicense').classList.remove('expanded');
   await saveModelSettings();
+  await checkModel();
 }));
 $('readModelLicense').addEventListener('click',()=>run(readModelLicense));
 $('acceptModelLicense').addEventListener('change',()=>{
   if(!modelInfo?.modern) return;
   acceptedLicenses=acceptedLicenses.filter(x=>x!==modelInfo.license_sha256);
   if($('acceptModelLicense').checked) acceptedLicenses.push(modelInfo.license_sha256);
+  modelState();
   if(settingsFile) saveModelSettings();
 });
 $('extract').addEventListener('click',()=>run(extract));
@@ -279,5 +339,5 @@ document.addEventListener('uxpcommand',event=>{
   if(event.commandId==='uxphidepanel') panelVisible=false;
 });
 setInterval(()=>{if(panelVisible && serviceReady && !busy) api('/health').catch(()=>{serviceReady=false;});},20000);
-run(async()=>{await restoreModelSettings();status('选择一批照片或文件夹；无需在 Photoshop 中打开素材。');});
+run(async()=>{await restoreModelSettings();inputState();await checkModel();status('处理当前照片，或从多张原片开始；也可直接使用页签。');});
 module.exports={api,extract,refresh};
