@@ -6,7 +6,7 @@ let docID = null, layerList = [], busy = false, updatingPickers=false;
 let currentPage='stack', serviceReady=false, documentSnapshot=null, panelVisible=true;
 let settingsFile=null, settingsWrite=Promise.resolve();
 let modelInfo=null, acceptedLicenses=[];
-let stackUI=null, processUI=null;
+let stackUI=null, processUI=null, prepareUI=null;
 const pickerValues = {};
 let blendSourceKey=null;
 const photoStages=new Map();
@@ -166,6 +166,7 @@ function updateActions() {
   $('decompositionHint').textContent=float?'32 位使用相加差值，与可用的线性减淡（添加）匹配；不降低位深。':'';
   if(stackUI) stackUI.updateActions(busy);
   if(processUI) processUI.updateActions(busy);
+  if(prepareUI) prepareUI.updateActions(busy);
 }
 function syncLayers() {
   if (busy || processUI?.isModalBusy()) return;
@@ -176,14 +177,14 @@ function syncLayers() {
     if (!next) {
       docID=null; layerList=[];
       for (const id of ['source','processSource','processBackground']) choose(id,[],null);
-      $('documentName').textContent='未打开照片'; if(currentPage!=='stack') status('请先打开一张照片。');
+      $('documentName').textContent='未打开照片'; if(!['stack','prepare'].includes(currentPage)) status('请先打开一张照片。');
       if(processUI) processUI.sync(next,old);
       updateActions(); return;
     }
     const changed=!old || old.id!==next.id;
     refresh(changed || old.active!==next.active);
     if(processUI) processUI.sync(next,old);
-    if (changed && currentPage!=='stack') status('选择图层后即可处理。');
+    if (changed && !['stack','prepare'].includes(currentPage)) status('选择图层后即可处理。');
     updateActions();
   } catch(e) { status(e.message,true); updateActions(); }
 }
@@ -208,13 +209,14 @@ async function ensureService() {
 }
 function showPage(page) {
   currentPage=page;
-  for(const name of ['stack','separate','process']) {
+  for(const name of ['stack','prepare','separate','process']) {
     $(name+'Page').classList.toggle('active',name===page);
     $(name+'Tab').classList.toggle('selected',name===page);
     $(name+'Tab').setAttribute('aria-selected',String(name===page));
   }
   syncLayers();
   if(page==='stack') status('选择一批照片或文件夹；无需在 Photoshop 中打开素材。');
+  if(page==='prepare') status('选择未拉伸的 Star Studio 32位线性TIFF母版，先检查范围，再创建独立副本。');
   if(page==='process') status('选择星点图层和可选背景，自动在 Photoshop 中预览。');
   processUI?.pageChanged();
 }
@@ -372,7 +374,7 @@ $('photoStage').addEventListener('change',()=>{
 });
 $('photoScene').addEventListener('change',()=>{inputState();if(settingsFile) saveModelSettings();});
 $('executable').value=config.starnet || '';
-for (const page of ['stack','separate','process']) $(page+'Tab').addEventListener('click',()=>showPage(page));
+for (const page of ['stack','prepare','separate','process']) $(page+'Tab').addEventListener('click',()=>showPage(page));
 $('modelOptions').addEventListener('click',()=>$('modelSettings').classList.toggle('expanded'));
 for(const id of ['stride','decomposition','executable']) $(id).addEventListener('change',()=>{if(settingsFile) saveModelSettings();});
 $('preserveModelBackground').addEventListener('change',()=>{updateActions();if(settingsFile) saveModelSettings();});
@@ -397,7 +399,8 @@ $('acceptModelLicense').addEventListener('change',()=>{
   if(settingsFile) saveModelSettings();
 });
 $('extract').addEventListener('click',()=>run(extract));
-stackUI=require('./stack.js').setup({run,api,job,status});
+prepareUI=require('./linear-preparation.js').setup({run,api,job,status,isBusy:()=>busy,onOpened:doc=>{photoStages.set(doc.id,'linear');refresh();}});
+stackUI=require('./stack.js').setup({run,api,job,status,onSaved:(file,format)=>prepareUI.setLastMaster(file,format)});
 processUI=require('./star-processing.js').setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,starEncoding:(doc,layer)=>starRelation(doc,layer).encoding,refreshBlendModes:()=>refreshBlendModes(workingDocument()),ensureService,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,currentPage:()=>currentPage});
 syncLayers();
 setInterval(syncLayers,800);

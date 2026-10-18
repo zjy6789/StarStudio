@@ -63,3 +63,5 @@ footer { padding:5px; } progress { width:100%; height:8px; }
 .processCompare { margin-top:10px; }
 #processCurve { height:75px; width:100%; background:#111; }
 #processPage > .row { flex-shrink:0; }
+#prepareMapping, #prepareResult { white-space:pre-wrap; }
+#prepareExecute { flex:1; width:auto; }

@@ -6,7 +6,7 @@ const vm=require('node:vm');
 const file=name=>({name,isFile:true,nativePath:'D:\\fixtures\\'+name});
 const plain=value=>JSON.parse(JSON.stringify(value));
 function panel() {
-  const elements=new Map(),documentEvents=new Map(),calls={jobs:[],api:[],open:[],save:[],status:[]};
+  const elements=new Map(),documentEvents=new Map(),calls={jobs:[],api:[],open:[],save:[],status:[],saved:[]};
   for(const match of fs.readFileSync('plugin/index.html','utf8').matchAll(/id="([^"]+)"/g)) {
     const classes=new Set(),listeners=new Map();
     elements.set(match[1],{value:'20',checked:false,selectedIndex:0,disabled:false,
@@ -34,7 +34,7 @@ function panel() {
   vm.runInNewContext(fs.readFileSync('plugin/stack.js','utf8'),context);
   h.ui=context.module.exports.setup({
     run:async action=>{h.ui.updateActions(true);try{return await action();}finally{h.ui.updateActions(false);}},
-    api:async(...args)=>{calls.api.push(args);return {};},
+    api:async(...args)=>{calls.api.push(args);return {};},onSaved:(file,format)=>calls.saved.push({file,format}),
     status:(message,error)=>calls.status.push({message,error}),
     job:async(request,started)=>{
       calls.jobs.push(plain(request));
@@ -93,6 +93,7 @@ for(const [index,format] of ['dng','tiff16','tiff32','fits16','fits32'].entries(
     h.emit('stackFormat','change');await h.execute();
     const request=h.calls.jobs[1],extension=format==='dng'?'dng':format.startsWith('fits')?'fit':'tif';
     assert.equal(request.format,format);assert.equal(request.output,h.saved.nativePath);
+    assert.equal(h.calls.saved[0].format,format);assert.equal(h.calls.saved[0].file,h.saved);
     assert.deepEqual(h.calls.save[0],{name:'StarStudio_stack.'+extension,options:{types:[extension]}});
     if(format.startsWith('fits')) {
       assert.match(request.photoshopOutput,/StarStudio_stack_\d+\.tif$/);

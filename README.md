@@ -8,9 +8,9 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前源码为 **0.7.1 Beta 候选**，增加开始引导、分离结果衔接、可撤销合成及简化后的星点加工。GitHub 已发布安装包仍为 **0.6.0 Beta**；源码与已发布安装包请分别核对。干净电脑安装及其他 Photoshop 版本尚未验证。详见 [VALIDATION.md](VALIDATION.md)。
+> 当前源码为 **0.8.0 Beta 候选**，新增线性母版范围准备，保留开始引导、分离衔接及星点加工。GitHub 已发布安装包仍为 **0.6.0 Beta**；源码与已发布安装包请分别核对。干净电脑安装及其他 Photoshop 版本尚未验证。详见 [VALIDATION.md](VALIDATION.md)。
 
-> 已完成调研报告中的 T1–T3；背景梯度、线性准备和新拉伸等仍是后续任务。各项独立提交，见 [T1/T2回退记录](docs/ITERATION_T1_T2_2026-10-18.md)及 [T3参数与比较](docs/ITERATION_T3_2026-10-18.md)。
+> 已完成调研报告中的 T1–T3，本轮新增T4的有限来源准备入口；背景梯度和受保护拉伸仍是后续任务。见 [T1/T2回退记录](docs/ITERATION_T1_T2_2026-10-18.md)、[T3参数与比较](docs/ITERATION_T3_2026-10-18.md)及 [线性准备约定](docs/LINEAR_PREPARATION.md)。
 
 > 0.6.0 安装包包含堆栈校准场与 FITS 输出，已验证数值及真实 RAW 暗场/偏置处理。使用规则见 [校准说明](docs/CALIBRATION.md)，测试结果和剩余范围见 [验证记录](VALIDATION.md)。需要在 Siril 继续处理时请选择 32 位 FITS；Siril 1.4.2 不能完整读取本插件 16 位 FITS 的缩放浮点范围。
 
@@ -60,7 +60,7 @@ StarNet++ 只需配置一次。它是外部程序，本项目不随包分发；�
 
 ## 从堆栈到星点加工
 
-面板按工作流排列：**堆栈 → 星点分离 → 星点加工**。图层自动同步，星点和预览背景都由用户自己选择。星点加工通过 Photoshop 原生图层混合展示合成效果，不再提供独立的星点重混合页面。
+面板按工作流排列：**堆栈 → 母版准备 → 星点分离 → 星点加工**。已有显影照片可跳过前两页。图层自动同步，星点和预览背景都由用户自己选择。星点加工通过 Photoshop 原生图层混合展示合成效果，不再提供独立的星点重混合页面。
 
 ### 1. 堆栈
 
@@ -88,7 +88,19 @@ StarNet++ 只需配置一次。它是外部程序，本项目不随包分发；�
 
 无 ICC 的 TIFF 假定为线性 ProPhoto RGB；JPEG/PNG 无 ICC 时按 sRGB 解码。暂不支持 LUT ICC、透明堆栈素材、不同尺寸或不同相机混合。详细精度与色彩约定见 [处理说明](docs/PROCESSING.md)。
 
-### 2. 星点分离
+### 2. 母版准备（线性TIFF，可选）
+
+已在 Photoshop 打开显影照片的用户可以跳过此页。它用于 **Star Studio 导出的未拉伸32位线性ProPhoto RGB TIFF母版**；首版不自动准备DNG、FITS、灰度、透明通道或外来ICC照片。需要此流程时，在堆栈保存格式中选择32位TIFF。
+
+1. 选择母版文件，或显式点击“使用刚保存的32位母版”。插件检查原始范围、ICC、负值和超范围高光；无须先把母版打开到PS。
+2. 确认这是尚未拉伸的母版。位深和ICC不代表照片从未被编辑，软件不会擅自猜测。
+3. 点击“创建后期副本并打开…”，选择新的TIFF位置。副本保持32位浮点、原尺寸和线性ProPhoto配置，原母版文件不变。检查与执行之间修改了母版时，需要重新检查。
+
+全图RGB共享同一范围映射，不按通道或百分位裁切，不把NaN/Inf填成黑色。原始范围、offset/scale及实际浮点舍入误差写入TIFF描述，并在面板显示。负值需要共同抬升零点，可能改变颜色比例；极端动态范围在float32副本中也可能损失低位差异，**副本不能替代母版，也不称为无损或保色显影**。本版不自动裁剪或接收含NaN/Inf边界的母版，需选择完全有限的有效母版。
+
+**范围准备没有进行非线性拉伸，也没有额外显示提亮。** 副本仍可能很暗，当前会话仍将其标为线性；请继续在独立副本显影，确认“已显影照片”后再去星。它不会反复准备已带本插件标记的副本，也不会放松普通图层上传的0..1检查。[数据约定与支持边界](docs/LINEAR_PREPARATION.md)
+
+### 3. 星点分离
 
 在 Photoshop 中打开照片，选择来源图层，点击 **执行星点分离**。
 
@@ -106,7 +118,7 @@ StarNet++ 只需配置一次。它是外部程序，本项目不随包分发；�
 
 图层操作支持 RGB / 灰度、8 / 16 / 32 位普通范围像素。32 位 HDR 若超出 `0..1` 会报错，须先映射到普通范围；这与允许超范围高光的 RAW 堆栈流程不同。新图层保持文档尺寸、颜色配置与透明度；智能对象输出为新的像素图层。
 
-### 3. 星点加工
+### 4. 星点加工
 
 手动选择星点图层，可再选择同一源文档中的背景图层。选择星点后自动在 Photoshop 新标签页打开全分辨率预览，无需点击预览按钮；选择背景后，可边调整星点边查看它覆盖背景的效果。
 

@@ -37,7 +37,7 @@ function panel(options={}) {
   const processUI={updateActions(){},pause:async()=>{calls.pause++;},resume:()=>{calls.resume++;},
     isModalBusy:()=>h.modalBusy,previewDocumentID:()=>h.previewID,pageChanged:()=>{calls.pages++;},
     sync:(next,old)=>calls.sync.push({next:plain(next),old:plain(old)})};
-  let stackSetups=0,processSetups=0;
+  let stackSetups=0,processSetups=0,prepareSetups=0;
   const context={module:{exports:{}},ArrayBuffer,
     console:{log(){},error:(...args)=>calls.errors.push(args)},
     document:{getElementById:get,createElement:()=>({}),
@@ -59,6 +59,7 @@ function panel(options={}) {
       if(name==='./bridge.json')return {url:'http://127.0.0.1:8765',token:'test-token',launcher:'D:\\StarStudio\\Start.exe',starnet:'D:\\engine\\starnet2.exe'};
       if(name==='uxp')return {storage:{localFileSystem:storage},shell:{openPath:async(...args)=>{calls.launch.push(args);return h.launchError;}}};
       if(name==='./stack.js')return {setup:options=>{stackSetups++;h.stackOptions=options;return {updateActions(){}};}};
+      if(name==='./linear-preparation.js')return {setup:options=>{prepareSetups++;h.prepareOptions=options;return {updateActions(){},setLastMaster:(file,format)=>{h.lastMaster={file,format};}};}};
       if(name==='./star-processing.js')return {setup:options=>{processSetups++;h.processOptions=options;return processUI;}};
       throw new Error('Unexpected require '+name);
     }
@@ -66,7 +67,7 @@ function panel(options={}) {
   // Execute the complete entry point, including setup, event bindings and timers.
   vm.runInNewContext(fs.readFileSync('plugin/main.js','utf8'),context);
   h.api=context.module.exports.api;
-  h.setups=()=>({stack:stackSetups,process:processSetups});
+  h.setups=()=>({stack:stackSetups,process:processSetups,prepare:prepareSetups});
   h.settle=()=>new Promise(setImmediate);
   h.emit=async(id,event='click')=>{for(const listener of get(id).listeners.get(event)||[])await listener();};
   h.command=async commandId=>{events.get('uxpcommand')({commandId});await h.settle();};
@@ -77,21 +78,21 @@ function panel(options={}) {
 
 test('the full panel starts on stack, restores model settings, and leaves star/background selection to the user',async()=>{
   const h=panel();await h.settle();
-  assert.deepEqual(h.setups(),{stack:1,process:1});assert.equal(h.calls.launch.length,0);
+  assert.deepEqual(h.setups(),{stack:1,process:1,prepare:1});assert.equal(h.calls.launch.length,0);
   assert.equal(h.get('stackPage').classList.contains('active'),true);
   assert.equal(h.get('processSource').selectedIndex,0);assert.equal(h.get('processBackground').selectedIndex,0);
   assert.equal(h.processOptions.value('processSource'),null);assert.equal(h.processOptions.value('processBackground'),null);
   assert.equal(h.get('stride').selectedIndex,1);assert.equal(h.get('executable').value,'D:\\engine\\starnet2.exe');
   assert.equal(h.get('extract').disabled,false);assert.match(h.get('documentName').textContent,/6000 × 4000/);
   assert.equal(h.calls.pause,h.calls.resume);assert.equal(h.calls.requests[0].options.headers['X-Star-Token'],'test-token');
-  for(const page of ['separate','process','stack']) {
+  for(const page of ['separate','process','prepare','stack']) {
     await h.emit(page+'Tab');
-    for(const name of ['stack','separate','process']) {
+    for(const name of ['stack','prepare','separate','process']) {
       assert.equal(h.get(name+'Page').classList.contains('active'),name===page);
       assert.equal(h.get(name+'Tab').attributes.get('aria-selected'),String(name===page));
     }
   }
-  assert.equal(h.calls.pages,3);
+  assert.equal(h.calls.pages,4);
   assert.ok(h.calls.requests.every(request=>['/health','/starnet-info'].includes(request.route)));
 });
 
@@ -106,6 +107,20 @@ test('start guidance offers a current-photo path without forcing a stack and wor
   assert.equal(h.get('photoStage').selectedIndex,0);
   await h.emit('startOptions');assert.equal(h.get('startSettings').classList.contains('expanded'),false);
   await h.emit('startOptions');assert.equal(h.get('startSettings').classList.contains('expanded'),true);
+});
+
+test('linear preparation has a file workflow without a document and successful copies retain the linear stage',async()=>{
+  const h=panel({noDocument:true});await h.settle();await h.emit('prepareTab');
+  assert.equal(h.get('preparePage').classList.contains('active'),true);
+  assert.match(h.get('status').textContent,/线性TIFF母版/);
+  const file={name:'stack.tif',nativePath:'D:\\stack.tif'};
+  h.stackOptions.onSaved(file,'tiff32');assert.equal(h.lastMaster.file,file);assert.equal(h.lastMaster.format,'tiff32');
+  const prepared={...h.doc,id:9,title:'Prepared linear',bitsPerChannel:32};
+  h.host.app.documents.push(prepared);h.host.app.activeDocument=prepared;
+  h.prepareOptions.onOpened(prepared);
+  assert.equal(h.get('photoStage').selectedIndex,2);
+  assert.equal(h.get('processSource').selectedIndex,0);
+  assert.equal(h.get('processBackground').selectedIndex,0);
 });
 
 test('stage confirmation belongs to the source document and is never inferred from bit depth or a preview',async()=>{

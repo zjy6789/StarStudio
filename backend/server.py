@@ -94,6 +94,12 @@ class Store:
                             def message(text):
                                 job["message"] = text
                             job["result"] = stack(request,self.path,progress,message,lambda:job.get("cancel",False))
+                    elif operation in ("prepareInspect", "prepareLinear"):
+                        from .linear_preparation import inspect_master, prepare_master
+                        job["message"] = "检查线性母版…" if operation == "prepareInspect" else "创建独立的32位范围准备副本…"
+                        canceled = lambda: job.get("cancel", False)
+                        job["result"] = (inspect_master(request["path"], progress, canceled) if operation == "prepareInspect"
+                                         else prepare_master(request, progress, canceled))
                     elif operation == "processStars":
                         from .star_processing import process_stars, curve_values
                         if job.get("cancel"):
@@ -166,7 +172,7 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                if operation == "processStars" and job.get("cancel"):
+                if operation in ("processStars", "prepareInspect", "prepareLinear") and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
                     job.update(state="error", error=str(e))

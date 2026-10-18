@@ -3,7 +3,7 @@ const fs=require('uxp').storage.localFileSystem;
 const $=id=>document.getElementById(id);
 const extensions=['arw','cr2','cr3','nef','nrw','raf','orf','rw2','pef','srw','dng','raw','tif','tiff','png','jpg','jpeg'];
 
-function setup({run,api,job,status}) {
+function setup({run,api,job,status,onSaved=()=>{}}) {
   let selection=null, strokes=[], drawing=null, activeJob=null;
   const calibration={dark:[],flat:[],bias:[],darkflat:[]};
   const modes=['mean','median','sigma','maximum','minimum'], formats=['dng','tiff16','tiff32','fits16','fits32'];
@@ -140,6 +140,7 @@ function setup({run,api,job,status}) {
         calibration:{...calibration,linearTiff:$('stackLinearTiff').checked},
         photoshopOutput:opening.nativePath},id=>{activeJob=id;updateActions(true);});
     } finally {activeJob=null;updateActions(true);}
+    onSaved(file,format);
     status('堆栈已保存，正在 Photoshop 中打开…');
     await host.core.executeAsModal(async()=>{
       const response=await require('photoshop').action.batchPlay([{_obj:'open',null:{_path:fs.createSessionToken(opening),_kind:'local'},_options:{dialogOptions:'dontDisplay'}}],{});

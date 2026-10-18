@@ -6,7 +6,7 @@
 
 入口读取磁盘文件，不经当前 `0..1` 图层上传接口，不放松 `validate_image()`。首版仅接受 **Star Studio 导出的、尚未拉伸的32位浮点RGB TIFF**：单幅、连续RGB、无透明通道、无压缩/瓦片，包含与本项目生成值完全相同的 `Star Studio Linear ProPhoto RGB` gamma1 ICC及原导出标识。用户仍需明确确认未拉伸；位深、直方图、ICC和软件标识本身不能证明照片从未被编辑。
 
-DNG、FITS、灰度、外来sRGB/Adobe RGB/Display P3、缺失或其他ICC均不在首版自动准备范围内。它们原有工作流不受影响。NaN/Inf（包括无覆盖边界）明确拒绝，先裁去无覆盖边界或重新选择有效区域，不能把它们悄悄改成0。
+DNG、FITS、灰度、外来sRGB/Adobe RGB/Display P3、缺失或其他ICC均不在首版自动准备范围内。它们原有工作流不受影响。NaN/Inf（包括无覆盖边界）明确拒绝，本版需使用完全有限的有效母版；不自动裁剪或填零，不能为重试而悄悄改写母版或其来源标识。
 
 ## 独立范围映射
 
@@ -45,3 +45,14 @@ source_estimate = float64(prepared) * scale + offset
 - [Adobe UXP Document](https://developer.adobe.com/photoshop/uxp/2022/ps_reference/classes/document/)：核对文档尺寸、bitsPerChannel与colorProfileName，避免自动换配置或降低位深。
 
 实际验证与未覆盖范围将在 [VALIDATION.md](../VALIDATION.md)记录；上述是实现前约定，不是已经通过的测试结论。
+
+## 候选版本与回退
+
+T4在独立分支 `codex/linear-preparation-t4-20261018` 实现，功能和后续验收记录逐次提交。完整候选标签为 `checkpoint/0.8.0-candidate-20261018`；迭代前为 `checkpoint/0.7.1-candidate-20261018`。在工作区干净、已保存照片及当前修改的独立分支中，可按从新到旧顺序回退本轮范围：
+
+```powershell
+git revert --no-commit checkpoint/0.7.1-candidate-20261018..checkpoint/0.8.0-candidate-20261018
+git commit -m "Revert T4 candidate; retain T1 to T3"
+```
+
+回退源码后需重新部署对应面板及后台；它不会删除或逆转已经创建/编辑的照片文件。已保存的母版始终独立保留。后续任务依赖T4时，需先按依赖顺序回退后续任务，不能无条件删除中间功能。

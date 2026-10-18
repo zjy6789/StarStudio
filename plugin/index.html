@@ -11,7 +11,17 @@
   <div class="row"><label>拍摄场景</label><sp-picker id="photoScene"><sp-menu><sp-menu-item>银河 / 带地景</sp-menu-item><sp-menu-item>深空</sp-menu-item></sp-menu></sp-picker></div>
   <div id="sceneHint" class="muted"></div>
 </div>
-<div class="tabs" role="tablist"><button id="stackTab" class="tab selected" role="tab" aria-selected="true">堆栈</button><button id="separateTab" class="tab" role="tab" aria-selected="false">星点分离</button><button id="processTab" class="tab" role="tab" aria-selected="false">星点加工</button></div>
+<div class="tabs" role="tablist"><button id="stackTab" class="tab selected" role="tab" aria-selected="true">堆栈</button><button id="prepareTab" class="tab" role="tab" aria-selected="false">母版准备</button><button id="separateTab" class="tab" role="tab" aria-selected="false">星点分离</button><button id="processTab" class="tab" role="tab" aria-selected="false">星点加工</button></div>
+<section id="preparePage" class="page" role="tabpanel">
+  <div class="row"><button id="prepareChoose">选择线性母版…</button><button id="prepareUseLast">使用刚保存的32位母版</button></div>
+  <div class="hint">首版支持 Star Studio 导出的未拉伸32位线性ProPhoto RGB TIFF。DNG请先保留原件；需要本流程时，从堆栈另存32位TIFF。外来ICC、灰度、透明通道和无覆盖NaN暂不自动准备。</div>
+  <div id="prepareSummary" class="hint">检查母版范围；原文件始终保留。</div>
+  <div id="prepareMapping" class="hint"></div>
+  <label class="processCompare"><input id="prepareConfirmed" type="checkbox"> 我确认这是未拉伸的 Star Studio 线性母版</label>
+  <div class="hint">创建独立32位浮点副本，统一映射负值和高光，不做硬裁切或ICC转换。浮点映射仍可能舍入，将报告误差；副本不能代替原母版。这一步未拉伸，也不会自动去星。</div>
+  <div class="row"><button id="prepareExecute" class="primary execute">创建后期副本并打开…</button><button id="prepareCancel" disabled>取消</button></div>
+  <div id="prepareResult" class="hint"></div>
+</section>
 <section id="separatePage" class="page" role="tabpanel">
   <label>源图层</label><sp-picker id="source" placeholder="选择源图层"><sp-menu></sp-menu></sp-picker>
   <div class="hint">默认使用当前图层，分离后保留原图层。</div>
