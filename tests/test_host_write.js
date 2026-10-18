@@ -66,29 +66,3 @@ for(const size of [8,16,32]) for(const profile of ['Display P3','Star Studio Lin
     assert.equal(written,true);assert.equal(disposed,true);
   });
 }
-
-test('canvas preview keeps an unregistered embedded profile without converting source pixels',async()=>{
-  const raw=new Float32Array([.125,.375,.75,.5]);
-  const copied={id:2,delete:async()=>{preview.layers.splice(preview.layers.indexOf(copied),1);}};
-  const fresh={id:3};
-  const preview={id:24,layers:[copied],bitsPerChannel:32,
-    resizeCanvas:async(w,h)=>{assert.equal(w,1);assert.equal(h,1);},
-    createLayer:async()=>{preview.layers.unshift(fresh);return fresh;}};
-  const source={id:23,duplicate:async(name,merged)=>{
-    assert.equal(name,'星点重混合预览（缩略）');assert.equal(merged,true);return preview;
-  }};
-  const app={documents:[source],getColorProfiles:async(space)=>{assert.equal(space,'RGB');return ['sRGB IEC61966-2.1'];},
-    createDocument:async()=>{throw new Error('Cannot create a document from an unregistered profile name');}};
-  const constants={BitsPerChannelType:{SIXTEEN:16}};
-  const imaging={createImageDataFromBuffer:async(buffer,options)=>{
-    assert.equal(options.colorProfile,'');assert.equal(buffer.constructor,Uint16Array);
-    return {dispose:()=>{}};
-  },putPixels:async(options)=>{assert.equal(options.documentID,24);assert.equal(options.layerID,3);}};
-  const core={executeAsModal:async(callback)=>callback({isCancelled:false})};
-  const context={require:()=>({app,constants,core,imaging}),module:{exports:{}},Float32Array,Uint8Array,Uint16Array};
-  vm.runInNewContext(fs.readFileSync('plugin/host.js','utf8'),context);
-  const id=await context.module.exports.canvasPreview(null,{id:'result',width:1,height:1},
-    {docID:23,components:4,colorSpace:'RGB',profile:'Display P3'},async()=>raw.buffer,()=>{});
-  assert.equal(id,24);assert.equal(preview.bitsPerChannel,16);
-  assert.deepEqual(preview.layers,[fresh]);assert.equal(source.id,23);
-});

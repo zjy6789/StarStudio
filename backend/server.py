@@ -13,6 +13,8 @@ import numpy as np
 from PIL import Image
 from .algorithms import ROOT, validate_image, color_count, starnet, starnet_info, separate, stretch, combine
 
+VERSION = json.loads((ROOT / "plugin/manifest.json").read_text(encoding="utf-8"))["version"]
+
 
 def sequence(image, chain, current):
     for p in chain:
@@ -70,6 +72,9 @@ class Store:
             self.processing_cache.clear()
 
     def job(self, request):
+        if not isinstance(request, dict) or not isinstance(request.get("op"), str) or not request["op"].strip():
+            raise ValueError("作业请求必须为对象，且包含非空字符串 op")
+        operation = request["op"]
         key = uuid.uuid4().hex
         job = {"id": key, "state": "queued", "progress": 0}
         self.jobs[key] = job
@@ -80,16 +85,16 @@ class Store:
                     job["state"] = "running"
                     def progress(x):
                         job["progress"] = round(float(x), 3)
-                    if request["op"] in ("stack", "stackInspect"):
+                    if operation in ("stack", "stackInspect"):
                         from .stacking import stack, inspect
-                        if request["op"] == "stackInspect":
+                        if operation == "stackInspect":
                             job["message"] = "读取基准帧预览…"
                             job["result"] = inspect(request["paths"])
                         else:
                             def message(text):
                                 job["message"] = text
                             job["result"] = stack(request,self.path,progress,message,lambda:job.get("cancel",False))
-                    elif request["op"] == "processStars":
+                    elif operation == "processStars":
                         from .star_processing import process_stars, curve_values
                         if job.get("cancel"):
                             job["state"] = "canceled"
@@ -123,7 +128,7 @@ class Store:
                             self.delete(job.pop("result")["image"])
                             job["state"] = "canceled"
                             return
-                    elif request["op"] == "extract":
+                    elif operation == "extract":
                         original = self.get(request["image"])
                         validate_image(original)
                         colors = np.asarray(original[..., :color_count(original)])
@@ -146,7 +151,7 @@ class Store:
                                          "starEncoding": encoding,
                                          "timings": timings, "provider": job.get("provider", "CPU（旧版）")}
                         timings["separateSeconds"] = time.perf_counter()-separate_started
-                    elif request["op"] == "mix":
+                    elif operation == "mix":
                         b = self.get(request["background"])
                         s = self.get(request["stars"])
                         if b.shape != s.shape:
@@ -161,7 +166,7 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                if request["op"] == "processStars" and job.get("cancel"):
+                if operation == "processStars" and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
                     job.update(state="error", error=str(e))
@@ -210,7 +215,7 @@ class Handler(BaseHTTPRequestHandler):
             parts = path.path.strip("/").split("/")
             q = {k: v[0] for k, v in parse_qs(path.query).items()}
             if self.command == "GET" and parts == ["health"]:
-                self.reply({"ok": True, "version": "0.5.1"})
+                self.reply({"ok": True, "version": VERSION})
                 return
             length = int(self.headers.get("Content-Length", 0))
             if length < 0 or length > 64*1024*1024:

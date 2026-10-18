@@ -4,11 +4,13 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 import threading
 
 import numpy as np
+import pytest
 
 from backend.server import Store, Handler
 from backend.algorithms import combine
@@ -67,6 +69,60 @@ def wait_for_job(store, key):
     job = store.jobs[key]
     assert job["state"] not in ("queued", "running"), job
     return job
+
+
+@pytest.mark.parametrize("payload", [{}, None, [], "extract", 1, {"op": None}, {"op": 1}, {"op": ""}, {"op": "  "}])
+def test_malformed_job_is_rejected_before_enqueue(tmp_path, payload):
+    store = Store(tmp_path)
+    with pytest.raises(ValueError, match="op"):
+        store.job(payload)
+    assert store.jobs == {}
+
+
+def test_failed_jobs_finish_and_do_not_block_valid_work(tmp_path):
+    store = Store(tmp_path)
+    for request in [{"op": "unknown"}, {"op": "extract"}, {"op": "processStars"}]:
+        job = wait_for_job(store, store.job(request))
+        assert job["state"] == "error", job
+        assert job["error"]
+    image = np.full((2, 3, 4), .25, dtype=np.float32)
+    image[..., 3] = 1
+    key = store.save(image)
+    job = wait_for_job(store, store.job(dict(op="processStars", image=key, settings={})))
+    assert job["state"] == "done", job
+    np.testing.assert_array_equal(store.get(job["result"]["image"]), image)
+
+
+def test_jobs_http_rejects_bad_bodies_and_recovers(tmp_path):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.token = "test-token"
+    server.store = Store(tmp_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    def post(body):
+        request = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/jobs", data=body,
+                                         headers={"X-Star-Token": server.token, "Content-Type": "application/json"})
+        return urllib.request.urlopen(request, timeout=3)
+    try:
+        for body in [b"{}", b"null", b"[]", b'"extract"', b'{"op": null}', b'{"op": ""}', b"{invalid"]:
+            with pytest.raises(urllib.error.HTTPError) as error:
+                post(body)
+            assert error.value.code == 400
+            assert json.load(error.value)["error"]
+        assert server.store.jobs == {}
+        image = np.full((2, 3, 4), .25, dtype=np.float32)
+        image[..., 3] = 1
+        key = server.store.save(image)
+        with post(json.dumps(dict(op="processStars", image=key, settings={})).encode()) as response:
+            job_id = json.load(response)["id"]
+        assert wait_for_job(server.store, job_id)["state"] == "done"
+        health = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/health",
+                                        headers={"X-Star-Token": server.token})
+        with urllib.request.urlopen(health, timeout=3) as response:
+            manifest = json.loads((Path(__file__).resolve().parents[1] / "plugin/manifest.json").read_text(encoding="utf-8"))
+            assert json.load(response) == {"ok": True, "version": manifest["version"]}
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=3)
 
 
 def test_extract_preserved_model_runs_engine_once_and_returns_signed_values(tmp_path, monkeypatch):
@@ -181,13 +237,17 @@ def test_processing_cache_tracks_one_source_and_releases_deleted_input(tmp_path,
     assert store.processing_cache == {}
 
 
-def test_component_stays_alive_for_panel_then_exits_without_client():
+def test_component_stays_alive_for_panel_then_exits_without_client(tmp_path):
     root = Path(__file__).resolve().parents[1]
-    config = json.loads((root / "plugin/bridge.json").read_text(encoding="utf-8"))
+    config = {"token": "lifecycle-test-token"}
+    (tmp_path / "plugin").mkdir()
+    (tmp_path / "plugin/bridge.json").write_text(json.dumps(config), encoding="utf-8")
+    (tmp_path / "plugin/manifest.json").write_bytes((root / "plugin/manifest.json").read_bytes())
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    process = subprocess.Popen([sys.executable, "-m", "backend.server", "--port", str(port), "--idle-seconds", "2"],
+    bootstrap = "import sys; from pathlib import Path; import backend.paths as paths; paths.ROOT=Path(sys.argv.pop(1)); from backend.server import main; main()"
+    process = subprocess.Popen([sys.executable, "-c", bootstrap, str(tmp_path), "--port", str(port), "--idle-seconds", "2"],
                                cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     request = urllib.request.Request(f"http://127.0.0.1:{port}/health", headers={"X-Star-Token": config["token"]})
     try:
@@ -200,6 +260,12 @@ def test_component_stays_alive_for_panel_then_exits_without_client():
                 time.sleep(.1)
         else:
             raise AssertionError("Test component did not start")
+        for body in [b"{}", b"null", b"[]"]:
+            bad = urllib.request.Request(f"http://127.0.0.1:{port}/jobs", data=body,
+                                         headers={"X-Star-Token": config["token"]})
+            with pytest.raises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(bad, timeout=1)
+            assert error.value.code == 400
         for _ in range(3):
             time.sleep(.8)
             with urllib.request.urlopen(request, timeout=1) as response:

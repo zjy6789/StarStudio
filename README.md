@@ -170,7 +170,7 @@ py -3.12 -m venv .venv
 ```powershell
 .venv\Scripts\python.exe -m pip install -r requirements-test.txt
 .venv\Scripts\python.exe -m pytest -q
-node --test tests\test_preview.js tests\test_star_processing.js tests\test_host_write.js tests\test_model_settings.js
+node --test tests\test_star_processing.js tests\test_host_write.js tests\test_model_settings.js tests\test_star_canvas.js tests\test_extract.js tests\test_stack.js tests\test_panel_startup.js
 ```
 
 `tools/` 的 smoke/native 脚本会实际处理图像，部分需要本地测试素材、Photoshop 或外部引擎；不要把它们作为安装步骤。持续集成不能代替 Photoshop 原生验证。

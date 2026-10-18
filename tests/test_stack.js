@@ -1,0 +1,157 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+
+const file=name=>({name,isFile:true,nativePath:'D:\\fixtures\\'+name});
+const plain=value=>JSON.parse(JSON.stringify(value));
+function panel() {
+  const elements=new Map(),documentEvents=new Map(),calls={jobs:[],api:[],open:[],save:[],status:[]};
+  for(const match of fs.readFileSync('plugin/index.html','utf8').matchAll(/id="([^"]+)"/g)) {
+    const classes=new Set(),listeners=new Map();
+    elements.set(match[1],{value:'20',checked:false,selectedIndex:0,disabled:false,
+      classList:{contains:name=>classes.has(name),toggle(name){classes.has(name)?classes.delete(name):classes.add(name);}},
+      addEventListener(name,action){listeners.set(name,action);},listeners,
+      getBoundingClientRect:()=>({left:10,top:20,width:400,height:400}),
+      removeAttribute(name){delete this[name];}});
+  }
+  const get=id=>{assert.ok(elements.has(id),'HTML element '+id);return elements.get(id);};
+  const h={get,calls,files:[file('a.NEF'),file('b.nef'),file('c.nef')],folder:null,
+    saved:file('output.dng'),openResult:[{}],failure:null,gate:null,
+    inspected:{paths:['D:\\fixtures\\a.NEF','D:\\fixtures\\b.nef','D:\\fixtures\\c.nef'],width:1000,height:500,reference:1,name:'b.nef',cacheGB:2,preview:'data:image/png;base64,test'}};
+  const storage={
+    getFileForOpening:async options=>{assert.equal(options.allowMultiple,true);assert.ok(options.types.includes('nef'));return h.files;},
+    getFolder:async()=>h.folder,
+    getFileForSaving:async(name,options)=>{calls.save.push({name,options:plain(options)});return h.saved;},
+    getTemporaryFolder:async()=>({createFile:async(name,options)=>{assert.equal(options.overwrite,false);return file(name);}}),
+    createSessionToken:entry=>'token:'+entry.nativePath
+  };
+  const host={core:{executeAsModal:async action=>action({})}};
+  const photoshop={action:{batchPlay:async commands=>{calls.open.push(plain(commands));return h.openResult;}}};
+  const context={module:{exports:{}},document:{getElementById:get,addEventListener:(name,action)=>documentEvents.set(name,action)},
+    btoa:s=>Buffer.from(s).toString('base64'),
+    require:name=>name==='./host.js'?host:name==='uxp'?{storage:{localFileSystem:storage}}:photoshop};
+  vm.runInNewContext(fs.readFileSync('plugin/stack.js','utf8'),context);
+  h.ui=context.module.exports.setup({
+    run:async action=>{h.ui.updateActions(true);try{return await action();}finally{h.ui.updateActions(false);}},
+    api:async(...args)=>{calls.api.push(args);return {};},
+    status:(message,error)=>calls.status.push({message,error}),
+    job:async(request,started)=>{
+      calls.jobs.push(plain(request));
+      if(request.op==='stackInspect')return plain(h.inspected);
+      started('stack-job');
+      if(h.gate)await h.gate;
+      if(h.failure)throw h.failure;
+      return {frames:3,seconds:1.2,encoding:{scale:1},calibration:{warnings:[]}};
+    }
+  });
+  h.emit=(id,event='click',data={})=>get(id).listeners.get(event)?.(data);
+  h.documentEvent=(name)=>documentEvents.get(name)?.();
+  h.select=()=>h.emit('stackFiles');
+  h.execute=()=>h.emit('stackExecute');
+  return h;
+}
+
+test('file and folder inspection filters inputs, selects the middle frame, and keeps selection on cancel',async()=>{
+  const h=panel();assert.equal(h.get('stackExecute').disabled,true);
+  h.files.push(file('notes.txt'),{name:'nested.nef',isFile:false});
+  await h.select();
+  assert.deepEqual(h.calls.jobs[0],{op:'stackInspect',paths:h.inspected.paths});
+  assert.match(h.get('stackSummary').textContent,/3 张.*第 2 张 b.nef/);
+  assert.equal(h.get('stackReference').src,h.inspected.preview);
+  assert.equal(h.get('stackExecute').disabled,false);
+  h.files=null;await h.select();assert.equal(h.calls.jobs.length,1);
+  h.folder={getEntries:async()=>[file('a.NEF'),file('b.nef'),file('c.nef'),file('notes.txt')]};
+  await h.emit('stackFolder');assert.deepEqual(h.calls.jobs[1].paths,h.inspected.paths);
+  h.folder=null;await h.emit('stackFolder');assert.equal(h.calls.jobs.length,2);
+});
+
+test('unsupported or single-image selections fail before inspection',async()=>{
+  const h=panel();h.files=[file('only.nef'),file('notes.txt')];
+  await assert.rejects(h.select(),/至少两张/);
+  assert.equal(h.calls.jobs.length,0);assert.equal(h.get('stackExecute').disabled,true);
+});
+
+for(const [index,mode] of ['mean','median','sigma','maximum','minimum'].entries()) {
+  test(`stack ${mode} sends the chosen scene and opens only the saved result`,async()=>{
+    const h=panel();await h.select();h.get('stackMode').selectedIndex=index;
+    h.get('stackScene').selectedIndex=1;h.emit('stackMode','change');
+    assert.match(h.get('stackCache').textContent,index===1||index===2?/2 GB/:/逐张累积/);
+    await h.execute();
+    assert.deepEqual(h.calls.jobs[1],{op:'stack',paths:h.inspected.paths,mode,landscape:true,mask:[],format:'dng',
+      output:h.saved.nativePath,calibration:{dark:[],flat:[],bias:[],darkflat:[],linearTiff:false},photoshopOutput:h.saved.nativePath});
+    assert.equal(h.calls.open.length,1);
+    assert.equal(h.calls.open[0][0].null._path,'token:'+h.saved.nativePath);
+    assert.match(h.calls.status.at(-1).message,/已保存并打开 3 帧/);
+    assert.equal(h.get('stackCancel').disabled,true);
+  });
+}
+
+for(const [index,format] of ['dng','tiff16','tiff32','fits16','fits32'].entries()) {
+  test(`${format} saves in the selected format and uses a float TIFF bridge for FITS`,async()=>{
+    const h=panel();await h.select();h.get('stackFormat').selectedIndex=index;
+    h.emit('stackFormat','change');await h.execute();
+    const request=h.calls.jobs[1],extension=format==='dng'?'dng':format.startsWith('fits')?'fit':'tif';
+    assert.equal(request.format,format);assert.equal(request.output,h.saved.nativePath);
+    assert.deepEqual(h.calls.save[0],{name:'StarStudio_stack.'+extension,options:{types:[extension]}});
+    if(format.startsWith('fits')) {
+      assert.match(request.photoshopOutput,/StarStudio_stack_\d+\.tif$/);
+      assert.notEqual(request.photoshopOutput,request.output);
+    } else assert.equal(request.photoshopOutput,request.output);
+    assert.equal(h.calls.open[0][0].null._path,'token:'+request.photoshopOutput);
+  });
+}
+
+test('optional calibration file/folder choices, clearing, and dark-flat dependency reach the stack request',async()=>{
+  const h=panel();await h.select();
+  h.files=[file('dark.NEF'),file('ignore.txt')];await h.emit('stackDarkFiles');
+  h.folder={getEntries:async()=>[file('bias.nef'),{name:'subfolder',isFile:false}]};await h.emit('stackBiasFolder');
+  h.files=[file('darkflat.nef')];await h.emit('stackDarkflatFiles');
+  await assert.rejects(h.execute(),/平暗场.*平场/);assert.equal(h.calls.save.length,0);
+  h.files=null;await h.emit('stackDarkFiles');assert.equal(h.get('stackDarkSummary').textContent,'1 张');
+  h.files=[file('flat.nef')];await h.emit('stackFlatFiles');
+  h.emit('stackCalibrationOptions');assert.equal(h.get('stackCalibrationSettings').classList.contains('expanded'),true);
+  h.get('stackLinearTiff').checked=true;await h.execute();
+  assert.deepEqual(h.calls.jobs.at(-1).calibration,{dark:[file('dark.NEF').nativePath],flat:[file('flat.nef').nativePath],
+    bias:[file('bias.nef').nativePath],darkflat:[file('darkflat.nef').nativePath],linearTiff:true});
+  h.emit('stackDarkClear');assert.equal(h.get('stackDarkSummary').textContent,'未使用');
+  assert.equal(h.get('stackDarkClear').disabled,true);
+  await h.execute();assert.deepEqual(h.calls.jobs.at(-1).calibration.dark,[]);
+});
+
+for(const portrait of [false,true]) test(`mask brush accounts for ${portrait?'horizontal':'vertical'} letterboxing and keeps normalized strokes`,async()=>{
+  const h=panel();if(portrait)Object.assign(h.inspected,{width:500,height:1000});
+  await h.select();h.get('stackPaint').checked=true;
+  const pointer=(x,y)=>({clientX:x,clientY:y,preventDefault(){}});
+  h.emit('stackMask','mousedown',pointer(30,40)); // Empty letterbox: ignore.
+  h.emit('stackMask','mousemove',pointer(210,220));
+  h.emit('stackMask','mousedown',portrait?pointer(160,220):pointer(110,220));
+  h.emit('stackMask','mousemove',portrait?pointer(160.01,220):pointer(110.01,220));
+  h.emit('stackMask','mousemove',pointer(600,600)); // Clamp to the image edge.
+  h.documentEvent('mouseup');h.emit('stackMask','mousemove',pointer(210,220));
+  await h.execute();
+  assert.deepEqual(h.calls.jobs[1].mask,[{radius:.025,points:[[.25,.5],[1,1]]}]);
+  h.emit('stackClearMask');await h.execute();assert.deepEqual(h.calls.jobs[2].mask,[]);
+});
+
+test('active stack can be canceled, locks selection, and releases controls after a failed job',async()=>{
+  const h=panel();await h.select();let finish;h.gate=new Promise(resolve=>{finish=resolve;});
+  h.failure=new Error('已取消');const pending=h.execute();await new Promise(setImmediate);
+  assert.equal(h.get('stackCancel').disabled,false);assert.equal(h.get('stackFiles').disabled,true);
+  h.get('stackPaint').checked=true;h.emit('stackMask','mousedown',{clientX:210,clientY:220});
+  h.emit('stackCancel');await new Promise(setImmediate);
+  assert.deepEqual(h.calls.api,[['/jobs/stack-job',undefined,false,'DELETE']]);
+  finish();await assert.rejects(pending,/已取消/);
+  assert.equal(h.calls.open.length,0);assert.equal(h.get('stackCancel').disabled,true);
+  assert.equal(h.get('stackExecute').disabled,false);assert.equal(h.get('stackDarkFiles').disabled,false);
+  h.failure=null;h.gate=null;await h.execute();assert.deepEqual(h.calls.jobs.at(-1).mask,[]);
+});
+
+test('save dialog cancellation and Photoshop open errors preserve a usable selection',async()=>{
+  const h=panel();await h.select();h.saved=null;await h.execute();
+  assert.equal(h.calls.jobs.length,1);assert.equal(h.calls.open.length,0);
+  h.saved=file('output.dng');h.openResult=[{_obj:'error',message:'Cannot open'}];
+  await assert.rejects(h.execute(),/堆栈已保存.*Cannot open/);
+  assert.equal(h.get('stackExecute').disabled,false);assert.equal(h.get('stackCancel').disabled,true);
+  h.openResult=[{}];await h.execute();assert.match(h.calls.status.at(-1).message,/已保存并打开/);
+});

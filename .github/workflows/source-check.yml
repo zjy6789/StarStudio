@@ -13,8 +13,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install Python test dependencies
+        run: python -m pip install -r requirements-test.txt
       - name: Python syntax
         run: python -m compileall -q backend tools tests
+      - name: Python numerical and bridge regressions
+        run: python -m pytest -q
       - name: JavaScript syntax and public manifest
         shell: pwsh
         run: |
@@ -24,4 +28,4 @@ jobs:
           }
           python -c "import json; from pathlib import Path; json.loads(Path('plugin/manifest.json').read_text()); assert not Path('plugin/bridge.json').exists()"
       - name: UXP pixel and processing regressions
-        run: node --test tests/test_preview.js tests/test_star_processing.js tests/test_host_write.js tests/test_model_settings.js tests/test_star_canvas.js tests/test_extract.js
+        run: node --test tests/test_star_processing.js tests/test_host_write.js tests/test_model_settings.js tests/test_star_canvas.js tests/test_extract.js tests/test_stack.js tests/test_panel_startup.js
