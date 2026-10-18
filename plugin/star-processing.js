@@ -14,9 +14,15 @@ const tools=[
 ];
 
 function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,currentPage,
-  refreshBlendModes=()=>{},ensureService=async()=>{},isBusy=()=>false,isUpdatingPickers=()=>false}) {
+  refreshBlendModes=()=>{},starEncoding=(doc,layer)=>host.starEncoding(doc,layer),ensureService=async()=>{},isBusy=()=>false,isUpdatingPickers=()=>false}) {
   let meta=null,last=null,desired=null,timer=null,previewState=null,worker=null,jobID=null;
   let paused=false,modalBusy=false,compositionVersion=0,compositionKey=null,nativeQueue=Promise.resolve(),failedKey=null,runningKey=null;
+  const applied=[];
+  function related(doc,source) {
+    const parent=applied.find(record=>record.docID===doc.id && record.layerID===source.id);
+    const origin=parent?.originID || source.id;
+    return {origin,records:applied.filter(record=>record.docID===doc.id && record.originID===origin)};
+  }
   function settings() {
     const result={};
     for(const [name,,,specs] of tools) {
@@ -43,7 +49,7 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
     const sourceKey=doc.id+':'+layer.id+':'+doc.activeHistoryState.id;
     const size=doc.bitsPerChannel===host.constants.BitsPerChannelType.EIGHT?8:doc.bitsPerChannel===host.constants.BitsPerChannelType.SIXTEEN?16:32;
     const info={docID:doc.id,layerID:layer.id,name:layer.name,width:doc.width,height:doc.height,
-      size,components:doc.mode===host.constants.DocumentMode.RGB?4:2,sourceKey,starEncoding:host.starEncoding(doc,layer)};
+      size,components:doc.mode===host.constants.DocumentMode.RGB?4:2,sourceKey,starEncoding:starEncoding(doc,layer)};
     const options=settings(),key=sourceKey+':'+info.starEncoding+':'+JSON.stringify(options);
     return {doc,layer,info,options,key,enabled:Object.values(options).some(x=>x.enabled)};
   }
@@ -214,27 +220,42 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
         temporary=result!==last?.result;
       }
       const backdrop=background();
-      output=await native(()=>host.transaction(target.doc,'星点加工',async context=>{
-        const layer=result?await host.write(target.doc,result.image,meta,target.layer.name+'_processed',api,report,context):await target.layer.duplicate(target.doc);
-        if(layer.allLocked) layer.allLocked=false;
-        layer.name=target.layer.name+'_processed';layer.visible=true;
-        host.setStarBlendMode(layer,blend,target.doc);
-        if(backdrop) layer.move(backdrop.layer,host.constants.ElementPlacement.PLACEBEFORE);
-        return layer;
-      }));
+      const family=related(target.doc,target.layer);
+      const composition=await native(()=>host.applyStarResult({doc:target.doc,source:target.layer,background:backdrop?.layer,
+        blend,result,meta,previous:family.records.map(record=>record.rootID)},api,report));
+      output=composition.layer;
+      applied.push({docID:target.doc.id,originID:family.origin,layerID:output.id,rootID:composition.root.id,
+        encoding:target.info.starEncoding,mode:blend,depth:target.doc.bitsPerChannel});
       // Writing a separate output changes source history, but not input pixels.
       const revised=selection();
       if(meta) meta.sourceKey=revised.info.sourceKey;
       if(temporary) {await remove(last?.result.image);last={key:revised.key,sourceKey:revised.info.sourceKey,result};temporary=false;}
       else if(last) {last.key=revised.key;last.sourceKey=revised.info.sourceKey;}
       desired=revised;refresh();
-      status('已创建 '+output.name+'，混合模式与预览一致。'+(result?.reconstructedStars?' 重建 '+result.reconstructedStars+' 个星点。':''));
+      status('已创建 '+output.name+(backdrop?' 的独立合成组':' 星点层')+'，混合模式与预览一致。已隐藏输入星点和关联的旧结果；其他图层保留原可见性。'+(result?.reconstructedStars?' 重建 '+result.reconstructedStars+' 个星点。':''));
     } finally {
       if(temporary) await remove(result?.image);
     }
   }));
   reset();updateActions();
   return {updateActions,previewDocumentID:()=>previewState?.docID,isModalBusy:()=>modalBusy,
+    relationFor(doc,layer) {
+      const record=applied.find(item=>item.docID===doc.id && item.layerID===layer.id && item.depth===doc.bitsPerChannel);
+      return record?{encoding:record.encoding,mode:record.mode}:null;
+    },
+    async viewBackground(doc,backdrop,stars) {
+      const family=related(doc,stars);
+      const root=await native(()=>host.transaction(doc,'查看无星背景',async()=>{
+        const copy=await backdrop.duplicate(doc);
+        if(copy.allLocked) copy.allLocked=false;
+        copy.name='无星背景 · 查看副本';copy.visible=true;copy.blendMode=host.constants.BlendMode.NORMAL;
+        await host.archiveLayer(doc,stars);await host.archiveLayer(doc,backdrop);
+        for(const record of family.records) {const old=host.findLayer(doc,record.rootID);if(old) await host.archiveLayer(doc,old);}
+        if(copy.id!==doc.layers[0].id) copy.move(doc.layers[0],host.constants.ElementPlacement.PLACEBEFORE);
+        host.app.activeDocument=doc;return copy;
+      }));
+      applied.push({docID:doc.id,originID:family.origin,rootID:root.id});
+    },
     pageChanged(){if(currentPage()!=='process'){clearTimeout(timer);++compositionVersion;compositionKey=null;cancel();}else schedule();},
     sync(next,old){if(next?.id!==old?.id || next?.history!==old?.history) schedule();},
     async pause(){paused=true;clearTimeout(timer);++compositionVersion;compositionKey=null;cancel();await worker;await nativeQueue;},

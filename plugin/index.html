@@ -25,17 +25,24 @@
     <label>处理步长</label><sp-picker id="stride"><sp-menu><sp-menu-item>256（默认）</sp-menu-item><sp-menu-item>128</sp-menu-item><sp-menu-item>64（较慢）</sp-menu-item><sp-menu-item>384（新版，广域小星点）</sp-menu-item></sp-menu></sp-picker>
     <div class="hint">步长越小，计算量越大。广域小星点可尝试新版 384；步长会改变去星效果，处理后检查残星与边缘。</div>
     <label>星点分离方式</label><sp-picker id="decomposition"><sp-menu><sp-menu-item>滤色星点（Screen）</sp-menu-item><sp-menu-item>相加星点（差值）</sp-menu-item></sp-menu></sp-picker>
+    <div id="decompositionHint" class="hint"></div>
   </div>
   <label><input id="preserveModelBackground" type="checkbox"> 保留模型背景（减少彩色残留）</label>
   <div class="hint">彩色暗圈严重时可尝试。不追加模糊或第二次推理，星点层自动使用相应混合模式；建议 16/32 位。</div>
   <button id="extract" class="primary execute">执行星点分离</button>
+  <div class="row"><button id="viewStarless">查看无星背景</button><button id="useSeparation">使用刚分离的星点与背景</button></div>
 </section>
 <section id="processPage" class="page" role="tabpanel">
+  <div class="row"><button id="useLastSeparation">使用刚分离的结果</button><button id="restoreMatchedBlend">恢复匹配混合</button></div>
+  <div id="processPairHint" class="hint">手动选择星点与可选背景；快捷操作只使用本会话记录的图层 ID。</div>
   <label>星点图层</label><div class="row"><sp-picker id="processSource" placeholder="选择星点图层"><sp-menu></sp-menu></sp-picker><button id="processUseActive">用当前图层</button></div>
   <label>背景图层（可选）</label><div class="row"><sp-picker id="processBackground" placeholder="不使用背景图层"><sp-menu></sp-menu></sp-picker><button id="processBackgroundUseActive">用当前图层</button></div>
   <label>星点混合模式</label><sp-picker id="processBlend"><sp-menu></sp-menu></sp-picker>
+  <button id="processRelationOptions" class="disclosure">手动指定分离关系 ▾</button>
+  <div id="processRelationSettings" class="collapsed"><label>分离关系</label><sp-picker id="processRelation"><sp-menu><sp-menu-item>按本会话记录；外来图层手动确认</sp-menu-item><sp-menu-item>滤色星点（黑底）</sp-menu-item><sp-menu-item>相加星点（黑底 / 浮点差值）</sp-menu-item><sp-menu-item>灰底修正星点（8/16 位线性光）</sp-menu-item></sp-menu></sp-picker></div>
   <div id="processEncodingHint" class="hint"></div>
   <div class="hint">选择图层后自动在 Photoshop 新标签页中显示全分辨率预览。加工后创建新的星点图层并保留所选混合模式。</div>
+  <div class="hint">选背景时创建独立合成组。输入及本会话关联的旧结果保留在不透明度为 0 的分组中，避免重复叠星并支持一次撤销；原层不合并。未选背景只输出星点。其他图层保留，透明区域仍可见下方内容。</div>
   <div id="processTools"></div>
   <div class="row"><button id="processReset">重置参数</button><label><input id="processOriginal" type="checkbox"> 查看原星点</label></div>
   <div id="processPreviewHint" class="muted">可随时切换背景、星点和混合模式。大半径辉光或星形修复计算时保留上一帧预览。</div>

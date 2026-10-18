@@ -11,6 +11,39 @@ const pickerValues = {};
 let blendSourceKey=null;
 const photoStages=new Map();
 const stages=['unknown','developed','linear'];
+const layerPairs=new Map();
+
+function separationPair(doc,starID) {
+  const pairs=layerPairs.get(doc.id) || [];
+  const pair=starID==null?pairs[pairs.length-1]:pairs.find(p=>p.starID===starID);
+  if(!pair || pair.width!==doc.width || pair.height!==doc.height || pair.depth!==doc.bitsPerChannel) return null;
+  const items=host.layers(doc);
+  // Losing the background invalidates the shortcut, not the surviving star encoding.
+  return items.some(l=>l.id===pair.starID)&&(starID!=null || items.some(l=>l.id===pair.backgroundID))?pair:null;
+}
+function starRelation(doc,layer) {
+  const index=$('processRelation').selectedIndex;
+  if(index===1 && doc.bitsPerChannel===host.constants.BitsPerChannelType.THIRTYTWO)
+    throw new Error('32 位不提供滤色混合；请使用实际以相加方式分离的星点，保留原文档位深。');
+  if(index===3 && doc.bitsPerChannel===host.constants.BitsPerChannelType.THIRTYTWO)
+    throw new Error('灰底修正仅用于 8/16 位；32 位请选择浮点相加关系。');
+  if(index>0) return {encoding:index===3?'gray':doc.bitsPerChannel===host.constants.BitsPerChannelType.THIRTYTWO?'signed':'black',mode:index===1?'screen':index===3?'linearLight':'linearDodge',known:true};
+  const pair=layer?separationPair(doc,layer.id):null;
+  if(pair) return {encoding:pair.encoding,mode:pair.encoding==='gray'?'linearLight':pair.mode==='add'?'linearDodge':'screen',known:true};
+  const processed=layer?processUI?.relationFor?.(doc,layer):null;
+  if(processed) return {...processed,known:true};
+  const encoding=host.starEncoding(doc,layer);
+  return {encoding,mode:encoding==='gray'?'linearLight':doc.bitsPerChannel===host.constants.BitsPerChannelType.THIRTYTWO?'linearDodge':'screen',known:false};
+}
+async function useSeparation() {
+  const doc=workingDocument(),pair=separationPair(doc);
+  if(!pair) throw new Error('刚分离的图层已删除、文档已变化或本会话没有记录，请手动选择。');
+  refresh();
+  for(const [id,layerID] of [['processSource',pair.starID],['processBackground',pair.backgroundID]])
+    $(id).selectedIndex=pickerValues[id].findIndex(item=>item.value===layerID);
+  $('processRelation').selectedIndex=0;
+  refreshBlendModes(doc,true);showPage('process');
+}
 
 function inputState() {
   const doc=host.app.documents.find(d=>d.id===docID);
@@ -97,20 +130,22 @@ function refresh(followActive=false) {
   $('documentName').textContent=doc.title+' · '+doc.width+' × '+doc.height;
   inputState();
 }
-function refreshBlendModes(doc) {
+function refreshBlendModes(doc,restore=false) {
   const source=host.layers(doc).find(x=>x.id===value('processSource'))?.layer;
-  const encoding=host.starEncoding(doc,source);
+  const key=doc.id+':'+(source?.id || '');
+  if(key!==blendSourceKey) $('processRelation').selectedIndex=0;
+  const relation=starRelation(doc,source),encoding=relation.encoding;
   const labels={normal:'正常',lighten:'变亮',screen:'滤色',colorDodge:'颜色减淡',linearDodge:'线性减淡（添加）',lighterColor:'浅色',linearLight:'线性光（灰底修正星点）'};
   const modes=encoding==='gray'?['linearLight']:host.starBlendModes(doc).filter(mode=>mode!=='linearLight');
-  const key=doc.id+':'+(source?.id || '');
   let selected=value('processBlend');
-  if(key!==blendSourceKey && source?.blendMode===host.constants.BlendMode.LINEARDODGE) selected='linearDodge';
+  if(restore || key!==blendSourceKey) selected=relation.known?relation.mode:source?.blendMode===host.constants.BlendMode.LINEARDODGE?'linearDodge':relation.mode;
   blendSourceKey=key;
   choose('processBlend',modes.map(mode=>({label:labels[mode],value:mode})),modes.includes(selected)?selected:modes.includes('screen')?'screen':encoding==='gray'?'linearLight':'linearDodge');
   $('processBlend').disabled=busy || encoding==='gray';
   $('processEncodingHint').textContent=encoding==='gray'
     ? '灰底修正星点使用线性光。加工只调整正星点，负差值保留；请保留来源图层的线性光模式。'
     : encoding==='signed'?'32 位浮点保留负差值；修正星点建议使用线性减淡（添加）。':'';
+  $('processPairHint').textContent=source?(relation.known?'已确认分离关系；可恢复匹配混合。':'外来星点来源关系未知；可在「分离关系」指定滤色、相加或灰底修正。')+' 仍可手动选择其他星点和背景。':'手动选择星点与可选背景，或显式使用刚分离的结果。';
 }
 function snapshot() {
   if (!host.app.documents.some(d=>!isPreview(d.id))) return null;
@@ -121,8 +156,14 @@ function snapshot() {
 }
 function updateActions() {
   inputState();
+  const doc=host.app.documents.find(d=>d.id===docID),pair=doc?separationPair(doc):null;
+  for(const id of ['useSeparation','useLastSeparation','viewStarless']) $(id).disabled=busy || !pair;
+  $('restoreMatchedBlend').disabled=busy || value('processSource')==null;
   $('extract').disabled=busy || !layerList.length;
-  $('decomposition').disabled=busy || $('preserveModelBackground').checked;
+  const float=doc?.bitsPerChannel===host.constants.BitsPerChannelType.THIRTYTWO;
+  if(float) $('decomposition').selectedIndex=1;
+  $('decomposition').disabled=busy || $('preserveModelBackground').checked || float;
+  $('decompositionHint').textContent=float?'32 位使用相加差值，与可用的线性减淡（添加）匹配；不降低位深。':'';
   if(stackUI) stackUI.updateActions(busy);
   if(processUI) processUI.updateActions(busy);
 }
@@ -261,7 +302,7 @@ async function extract() {
   status('读取源图层…');
   const meta=await host.core.executeAsModal(()=>host.upload(doc,layer,api,report),{commandName:'读取源图层'});
   const readSeconds=(Date.now()-started)/1000;
-  const mode=value('decomposition')===1?'add':'screen';
+  const mode=meta.size===32 || value('decomposition')===1?'add':'screen';
   const preserveModelBackground=$('preserveModelBackground').checked;
   const starEncoding=meta.size===32?'signed':'gray';
   const result=await job({op:'extract',image:meta.id,executable:modelExecutable(),license_sha256:modelInfo.license_sha256,stride,mode,preserveModelBackground,starEncoding});
@@ -283,14 +324,40 @@ async function extract() {
     }
   }
   refresh();
+  const pairs=layerPairs.get(doc.id) || [];
+  pairs.push({docID:doc.id,sourceID:layer.id,starID:stars.id,backgroundID:bg.id,mode,
+    encoding:preserveModelBackground?starEncoding:meta.size===32?'signed':'black',
+    width:doc.width,height:doc.height,depth:doc.bitsPerChannel});
+  layerPairs.set(doc.id,pairs);updateActions();
   documentSnapshot=snapshot();
   const timings=result.timings || {};
   const format=x=>Number(x || 0).toFixed(1)+'秒';
-  status('分离完成 · '+result.provider+' · 总计 '+format((Date.now()-started)/1000)+'（读取 '+format(readSeconds)+'，引擎 '+format(timings.engineSeconds)+'，写回 '+format((Date.now()-writeStarted)/1000)+'）。可在星点加工页选择两张图层。');
+  status('分离完成 · '+result.provider+' · 总计 '+format((Date.now()-started)/1000)+'（读取 '+format(readSeconds)+'，引擎 '+format(timings.engineSeconds)+'，写回 '+format((Date.now()-writeStarted)/1000)+'）。可点击「使用刚分离的星点与背景」，或继续手动选层。');
   console.log('星点分离耗时',JSON.stringify({...timings,uploadSeconds:readSeconds,writeSeconds:(Date.now()-writeStarted)/1000,totalSeconds:(Date.now()-started)/1000}));
 }
 for (const id of ['decomposition','stride']) $(id).selectedIndex=0;
 $('photoStage').selectedIndex=0;$('photoScene').selectedIndex=0;
+$('processRelation').selectedIndex=0;
+$('processRelationOptions').addEventListener('click',()=>$('processRelationSettings').classList.toggle('expanded'));
+$('useSeparation').addEventListener('click',()=>run(useSeparation));
+$('useLastSeparation').addEventListener('click',()=>run(useSeparation));
+$('restoreMatchedBlend').addEventListener('click',()=>{
+  try {
+    const {doc,layer}=selectedLayer('processSource');
+    if(!starRelation(doc,layer).known) throw new Error('此图层的分离关系未知，请先展开「手动指定分离关系」确认。');
+    refreshBlendModes(doc,true);processUI.pageChanged();
+  } catch(e) {status(e.message,true);}
+});
+$('processRelation').addEventListener('change',()=>{
+  try {refreshBlendModes(workingDocument(),true);processUI.pageChanged();} catch(e) {status(e.message,true);}
+});
+$('viewStarless').addEventListener('click',()=>run(async()=>{
+  const doc=workingDocument(),pair=separationPair(doc);
+  if(!pair) throw new Error('图层关联已失效，请手动选择无星背景。');
+  const items=host.layers(doc);
+  await processUI.viewBackground(doc,items.find(l=>l.id===pair.backgroundID).layer,items.find(l=>l.id===pair.starID).layer);
+  status('正在查看无星背景；其他未选择的图层保留原可见性。');
+}));
 $('startOptions').addEventListener('click',()=>{
   const expanded=!$('startSettings').classList.contains('expanded');
   $('startSettings').classList.toggle('expanded',expanded);
@@ -331,7 +398,7 @@ $('acceptModelLicense').addEventListener('change',()=>{
 });
 $('extract').addEventListener('click',()=>run(extract));
 stackUI=require('./stack.js').setup({run,api,job,status});
-processUI=require('./star-processing.js').setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,refreshBlendModes:()=>refreshBlendModes(workingDocument()),ensureService,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,currentPage:()=>currentPage});
+processUI=require('./star-processing.js').setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,starEncoding:(doc,layer)=>starRelation(doc,layer).encoding,refreshBlendModes:()=>refreshBlendModes(workingDocument()),ensureService,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,currentPage:()=>currentPage});
 syncLayers();
 setInterval(syncLayers,800);
 document.addEventListener('uxpcommand',event=>{

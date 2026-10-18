@@ -21,9 +21,14 @@ function panel(options={}) {
   const doc={id:7,width:6000,height:4000,bitsPerChannel:16,title:'Test',layers:[layer],activeLayers:[layer],activeHistoryState:{id:1}};
   const h={get,calls,doc,healthFailures:options.healthFailures||0,online:options.online!==false,
     launchError:options.launchError||'',chosenFile:null,fileGate:null,previewID:null,modalBusy:false};
-  const host={app:{documents:options.noDocument?[]:[doc],activeDocument:options.noDocument?null:doc},constants:{BlendMode:{LINEARDODGE:'linearDodge'}},
+  const host={app:{documents:options.noDocument?[]:[doc],activeDocument:options.noDocument?null:doc},constants:{BitsPerChannelType:{EIGHT:8,SIXTEEN:16,THIRTYTWO:32},BlendMode:{LINEARDODGE:'linearDodge',LINEARLIGHT:'linearLight'}},
     documentInfo:doc=>doc,layers:doc=>doc.layers.map(layer=>({id:layer.id,name:layer.name,layer})),
-    starEncoding:()=> 'black',starBlendModes:()=>['normal','lighten','screen','linearDodge']};
+    starEncoding:(doc,layer)=>doc.bitsPerChannel===32?'signed':layer?.blendMode==='linearLight'?'gray':'black',
+    starBlendModes:doc=>doc.bitsPerChannel===32?['normal','lighten','linearDodge']:['normal','lighten','screen','linearDodge','linearLight'],
+    core:{executeAsModal:async action=>action({})},transaction:async(doc,name,action)=>action({}),
+    upload:async(doc,layer)=>({id:'input',width:doc.width,height:doc.height,size:doc.bitsPerChannel,components:4,name:layer.name,docID:doc.id,layerID:layer.id}),
+    write:async(doc,key,meta,name)=>{const layer={id:20+doc.layers.length,name,visible:true};doc.layers.unshift(layer);doc.activeHistoryState.id++;return layer;},
+    setStarBlendMode:(layer,mode)=>{layer.blendMode=mode;}};
   h.host=host;
   const settings={name:'model-settings.json',read:async()=>JSON.stringify(options.saved||{executable:'D:\\engine\\starnet2.exe',stride:1,decomposition:0}),
     write:async value=>calls.writes.push(JSON.parse(value))};
@@ -45,8 +50,9 @@ function panel(options={}) {
       calls.requests.push({route,options:plain(requestOptions)});
       if(route==='/health' && (!h.online || h.healthFailures-->0))throw new Error('connection refused');
       if(route==='/starnet-info' && options.modelError)throw new Error(options.modelError);
+      if(route==='/jobs')h.jobRequest=JSON.parse(requestOptions.body);
       const data=route==='/starnet-info'?{modern:true,license:'Terms',license_sha256:'revision-1'}:{ok:true,version:'0.6.0'};
-      return {ok:true,json:async()=>data};
+      return {ok:true,json:async()=>route==='/jobs'?{id:'extract-job'}:route==='/jobs/extract-job'?{state:'done',progress:1,result:{background:'bg',stars:'stars',provider:'test',starEncoding:h.jobRequest.preserveModelBackground?h.jobRequest.starEncoding:'black'}}:data};
     },
     require:name=>{
       if(name==='./host.js')return host;
@@ -217,4 +223,48 @@ test('startup timeout reports the failure and releases the panel',async()=>{
   assert.match(h.get('status').textContent,/组件启动失败/);
   assert.equal(h.calls.launch.length,1);assert.equal(h.calls.pause,h.calls.resume);
   assert.equal(h.get('chooseExecutable').disabled,false);
+});
+
+for(const [size,preserve,add,blend,encoding] of [[16,false,false,'screen','black'],[16,false,true,'linearDodge','black'],[16,true,false,'linearLight','gray'],[32,false,false,'linearDodge','signed'],[32,true,false,'linearDodge','signed']]) {
+  test(`${size}-bit ${preserve?'model correction':add?'additive':'default'} pairs require explicit use and restore their actual relation after renaming`,async()=>{
+    const h=panel({saved:{executable:'D:\\engine\\starnet2.exe',acceptedLicenses:['revision-1']}});await h.settle();
+    h.doc.bitsPerChannel=size;h.doc.activeHistoryState.id++;await h.tick(800);
+    h.get('photoStage').selectedIndex=1;await h.emit('photoStage','change');
+    h.get('preserveModelBackground').checked=preserve;h.get('decomposition').selectedIndex=add?1:0;
+    await h.emit('extract');
+    assert.match(h.get('status').textContent,/分离完成/);
+    assert.equal(h.processOptions.value('processSource'),null);assert.equal(h.get('useSeparation').disabled,false);
+    const stars=h.doc.layers.find(layer=>layer.name.endsWith('_starmask')),background=h.doc.layers.find(layer=>layer.name.endsWith('_starless'));
+    stars.name='Renamed editable stars';background.name='Renamed background';await h.tick(800);
+    await h.emit('useSeparation');
+    assert.equal(h.processOptions.value('processSource'),stars.id);assert.equal(h.processOptions.value('processBackground'),background.id);
+    assert.equal(h.processOptions.value('processBlend'),blend);assert.equal(h.processOptions.starEncoding(h.doc,stars),encoding);
+    assert.equal(h.get('processPage').classList.contains('active'),true);
+    if(size===32)assert.equal(h.jobRequest.mode,'add');
+    if(encoding==='gray')stars.blendMode='screen'; // Known encoding is independent of a user-changed blend mode.
+    assert.equal(h.processOptions.starEncoding(h.doc,stars),encoding);
+    h.get('processBlend').selectedIndex=0;await h.emit('restoreMatchedBlend');assert.equal(h.processOptions.value('processBlend'),blend);
+    h.processOptions.useActive('processSource');await h.tick(800);
+    assert.equal(h.processOptions.value('processSource'),11,'Synchronization must preserve a manual source choice');
+    h.doc.layers=h.doc.layers.filter(layer=>layer.id!==background.id);h.doc.activeHistoryState.id++;await h.tick(800);
+    assert.equal(h.get('useLastSeparation').disabled,true);
+    assert.equal(h.processOptions.starEncoding(h.doc,stars),encoding,'Deleting the partner must not erase a known star encoding');
+    await h.emit('useLastSeparation');assert.match(h.get('status').textContent,/请手动选择/);
+    assert.equal(h.processOptions.value('processSource'),11);
+  });
+}
+
+test('manual relation restores its blend and encoding without pretending an unknown 32-bit Screen pair is valid',async()=>{
+  const h=panel();await h.settle();h.processOptions.useActive('processSource');
+  h.processOptions.refreshBlendModes();
+  await h.emit('restoreMatchedBlend');assert.match(h.get('status').textContent,/分离关系未知.*确认/);
+  h.get('processRelation').selectedIndex=2;await h.emit('processRelation','change');
+  assert.equal(h.processOptions.value('processBlend'),'linearDodge');
+  h.get('processRelation').selectedIndex=3;await h.emit('processRelation','change');
+  assert.equal(h.processOptions.value('processBlend'),'linearLight');assert.equal(h.processOptions.starEncoding(h.doc,h.doc.layers[0]),'gray');
+  h.doc.bitsPerChannel=32;h.doc.activeHistoryState.id++;await h.tick(800);
+  h.get('processRelation').selectedIndex=1;await h.emit('processRelation','change');
+  assert.match(h.get('status').textContent,/32 位不提供滤色/);assert.equal(h.doc.bitsPerChannel,32);
+  h.get('processRelation').selectedIndex=2;await h.emit('processRelation','change');
+  assert.equal(h.processOptions.value('processBlend'),'linearDodge');
 });

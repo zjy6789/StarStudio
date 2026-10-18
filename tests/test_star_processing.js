@@ -65,7 +65,7 @@ function processingHarness() {
   const document={createElement:element,getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);}};
   const doc={id:7,width:6000,height:4000,bitsPerChannel:'sixteen',mode:'rgb',activeHistoryState:{id:1}};
   function outputLayer() {
-    const output={id:100+calls.outputs.length,allLocked:false,move(layer,placement){this.placedBefore=layer.id;this.placement=placement;}};
+    const output={id:100+calls.outputs.length,allLocked:false,duplicate:async()=>outputLayer(),move(layer,placement){this.placedBefore=layer.id;this.placement=placement;}};
     calls.outputs.push(output);doc.activeHistoryState.id++;return output;
   }
   const layers=new Map([11,12,13].map(id=>[id,{id,name:'Layer '+id,duplicate:async()=>outputLayer()}]));
@@ -85,6 +85,13 @@ function processingHarness() {
     transaction:async(source,name,action)=>action({}),write:async(source,key,meta)=>{assert.equal(images.has(key),true);return outputLayer();},
     starEncoding(source,layer){return source.bitsPerChannel==='thirtytwo'?'signed':layer.blendMode==='linearLight'?'gray':'black';},
     setStarBlendMode(layer,blend){layer.blendMode=blend;}};
+  host.applyStarResult=async({doc,source,background,blend,result,meta,previous})=>{
+    const layer=result?await host.write(doc,result.image,meta):await source.duplicate(doc);
+    layer.name=source.name+'_processed';layer.visible=true;host.setStarBlendMode(layer,blend);
+    if(background)layer.move(background,host.constants.ElementPlacement.PLACEBEFORE);
+    calls.applied??=[];calls.applied.push({source:source.id,background:background?.id,previous});
+    return {layer,root:layer};
+  };
   const harness={elements,timers,calls,values,jobs,images,doc,host,layers,cancelDelayed:false,createGate:null,pollGate:null};
   async function api(path,body,binary,method='GET') {
     if(path==='/jobs') {
@@ -280,4 +287,17 @@ test('the new preview tab is never selected as the source while native creation 
   assert.equal(vm.runInNewContext('workingDocument()',context).id,8);
   host.app.activeDocument=preview;host.app.documents=[preview];
   assert.equal(vm.runInNewContext('snapshot()',context),null);
+});
+
+test('repeated applications replace their own earlier results even after switching background or selecting an earlier output',async()=>{
+  const h=processingHarness();await h.enableGlow();h.finish('job1');await h.tick(150);
+  await h.emit('processExecute','click');await h.flush();
+  const first=h.calls.outputs[0];h.layers.set(first.id,first);
+  h.emit('processBackground','change',12);await h.flush();await h.emit('processExecute','click');await h.flush();
+  const second=h.calls.outputs[1];
+  assert.deepEqual(Array.from(h.calls.applied[1].previous),[first.id]);
+  h.emit('processSource','change',first.id);await h.flush();
+  // Neutral application avoids another worker while still testing output lineage.
+  h.emit('processReset','click');await h.flush();await h.emit('processExecute','click');await h.flush();
+  assert.deepEqual(Array.from(h.calls.applied[2].previous),[first.id,second.id]);
 });

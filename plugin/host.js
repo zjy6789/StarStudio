@@ -216,4 +216,54 @@ async function transaction(doc, commandName, action) {
   }, {commandName});
 }
 
-module.exports = {app, core, imaging, constants, layers, documentInfo, upload, write, starBlendModes, starEncoding, setStarBlendMode, canvasStarPreview, transaction};
+function findLayer(doc, id) {
+  function walk(items) {
+    for(const layer of items) {
+      if(layer.id===id) return layer;
+      if(layer.layers) {const found=walk(layer.layers);if(found) return found;}
+    }
+  }
+  return walk(doc.layers);
+}
+
+async function archiveLayer(doc,layer) {
+  function visible(items,shown=true) {
+    for(const item of items) {
+      const active=shown && item.visible && item.opacity!==0;
+      if(item.id===layer.id) return active;
+      if(item.layers) {const found=visible(item.layers,active);if(found!==undefined) return found;}
+    }
+  }
+  if(!visible(doc.layers)) return;
+  // Photoshop may omit visibility toggles from history. A newly created
+  // zero-opacity wrapper is structural and restores correctly with one undo.
+  const archive=await doc.createLayerGroup({name:layer.name+' · 保留原层（不参与合成）',fromLayers:[layer],
+    blendMode:constants.BlendMode.NORMAL});
+  archive.opacity=0;
+}
+
+async function applyStarResult({doc,source,background,blend,result,meta,previous=[]},api,report) {
+  return transaction(doc,'星点加工与合成',async context=>{
+    const layer=result?await write(doc,result.image,meta,source.name+'_processed',api,report,context):await source.duplicate(doc);
+    if(layer.allLocked) layer.allLocked=false;
+    layer.name=source.name+'_processed';layer.visible=true;setStarBlendMode(layer,blend,doc);
+    let root=layer;
+    if(background) {
+      const copy=await background.duplicate(doc);
+      if(copy.allLocked) copy.allLocked=false;
+      copy.name='背景副本';copy.visible=true;copy.blendMode=constants.BlendMode.NORMAL;
+      layer.move(copy,constants.ElementPlacement.PLACEBEFORE);
+      root=await doc.createLayerGroup({name:source.name+' · 星点加工合成',fromLayers:[layer,copy],blendMode:constants.BlendMode.NORMAL});
+    }
+    if(context.isCancelled) throw new Error('用户取消了操作。');
+    await archiveLayer(doc,source);
+    if(background) await archiveLayer(doc,background);
+    for(const id of previous) {const old=findLayer(doc,id);if(old && old.id!==root.id) await archiveLayer(doc,old);}
+    const top=doc.layers[0];
+    if(root.id!==top.id) root.move(top,constants.ElementPlacement.PLACEBEFORE);
+    app.activeDocument=doc;
+    return {layer,root};
+  });
+}
+
+module.exports = {app, core, imaging, constants, layers, findLayer, archiveLayer, documentInfo, upload, write, starBlendModes, starEncoding, setStarBlendMode, canvasStarPreview, transaction, applyStarResult};
