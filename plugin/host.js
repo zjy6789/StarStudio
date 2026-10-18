@@ -140,7 +140,7 @@ async function canvasStarPreview(state, result, meta, background, blendMode, api
     if(created) {
       // A duplicate carries the source's embedded ICC and bit depth unchanged.
       // The copied composite is discarded; neither preview source is flattened.
-      doc=await source.duplicate('星点加工预览',true);
+      doc=await source.duplicate('星点加工预览 · '+source.title,true);
       try {
         check();
         const copied=Array.from(doc.layers);

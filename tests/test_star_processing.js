@@ -54,15 +54,18 @@ function processingHarness() {
   const values={processSource:null,processBackground:null,processBlend:'screen'};
   const jobs=new Map(),images=new Set();
   let timerID=0,imageID=0,busy=false,ui;
+  function connect(node) {node.connected=true;for(const child of node.children)connect(child);}
   function element() {
     const classes=new Set();
-    return {value:'',checked:false,disabled:false,listeners:{},children:[],
+    return {value:'',checked:false,disabled:false,listeners:{},children:[],connected:false,
+      set id(id){this._id=id;elements.set(id,this);},get id(){return this._id;},
       classList:{toggle(name,enabled){if(enabled===undefined)enabled=!classes.has(name);enabled?classes.add(name):classes.delete(name);},contains:name=>classes.has(name)},
-      setAttribute(){},appendChild(child){this.children.push(child);if(child.id)elements.set(child.id,child);},
+      setAttribute(){},appendChild(child){this.children.push(child);if(this.connected)connect(child);},
       addEventListener(name,action){this.listeners[name]=action;},
-      set innerHTML(html){for(const match of html.matchAll(/<[^>]+id="([^"]+)"[^>]*>/g)){const child=element();child.value=match[0].match(/value="([^"]+)"/)?.[1]??'';elements.set(match[1],child);}}};
+      set innerHTML(html){for(const match of html.matchAll(/<[^>]+id="([^"]+)"[^>]*>/g)){const child=element();child.id=match[1];child.value=match[0].match(/value="([^"]+)"/)?.[1]??'';this.appendChild(child);}}};
   }
-  const document={createElement:element,getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);}};
+  for(const match of fs.readFileSync('plugin/index.html','utf8').matchAll(/id="([^"]+)"/g)) {const node=element();node.id=match[1];connect(node);}
+  const document={createElement:element,getElementById:id=>elements.get(id)?.connected?elements.get(id):null};
   const doc={id:7,width:6000,height:4000,bitsPerChannel:'sixteen',mode:'rgb',activeHistoryState:{id:1}};
   function outputLayer() {
     const output={id:100+calls.outputs.length,allLocked:false,duplicate:async()=>outputLayer(),move(layer,placement){this.placedBefore=layer.id;this.placement=placement;}};
@@ -300,4 +303,89 @@ test('repeated applications replace their own earlier results even after switchi
   // Neutral application avoids another worker while still testing output lineage.
   h.emit('processReset','click');await h.flush();await h.emit('processExecute','click');await h.flush();
   assert.deepEqual(Array.from(h.calls.applied[2].previous),[first.id,second.id]);
+});
+
+test('opening basic and advanced controls never enables effects or submits a job',async()=>{
+  const h=processingHarness();h.emit('processSource','change',11);await h.flush();
+  h.emit('reductionDisclosure','click');h.emit('reductionAdvancedToggle','click');
+  assert.equal(h.elements.get('reductionDetails').classList.contains('expanded'),true);
+  assert.equal(h.elements.get('reductionAdvanced').classList.contains('expanded'),true);
+  assert.equal(h.elements.get('reductionEnabled').checked,false);
+  await h.tick(180);assert.equal(h.calls.jobs.length,0);
+  h.elements.get('reductionEnabled').checked=true;h.emit('reductionEnabled','change');
+  h.emit('process_reduction_strength_range','input',.6);h.emit('process_reduction_radius','change',1.7);
+  await h.tick(180);
+  assert.equal(h.calls.jobs[0].request.settings.reduction.strength,.6);
+  assert.equal(h.calls.jobs[0].request.settings.reduction.radius,1.7);
+  assert.equal(Number(h.elements.get('process_reduction_strength').value),.6);
+  assert.equal(Number(h.elements.get('process_reduction_radius_range').value),1.7);
+  h.finish('job1');await h.tick(150);
+});
+
+test('presets replace settings explicitly, expose their pixel radii and reset returns to the original',async()=>{
+  const h=processingHarness();h.emit('processSource','change',11);await h.flush();
+  h.emit('processNatural','click');await h.tick(180);
+  const natural=h.calls.jobs[0].request.settings;
+  assert.deepEqual(Object.entries(natural).filter(([,s])=>s.enabled).map(([k])=>k),['reduction']);
+  assert.equal(natural.reduction.strength,.25);assert.equal(natural.reduction.radius,1);
+  assert.match(h.elements.get('processSettingsHint').textContent,/缩星.*1.*像素/);
+  h.finish('job1');await h.tick(150);
+  h.emit('processSoft','click');await h.tick(180);
+  const soft=h.calls.jobs[1].request.settings;
+  assert.deepEqual(Object.entries(soft).filter(([,s])=>s.enabled).map(([k])=>k),['glow']);
+  assert.equal(soft.glow.strength,.6);assert.equal(soft.glow.radius,12);
+  assert.match(h.elements.get('processSettingsHint').textContent,/辉光.*12.*像素/);
+  h.finish('job2');await h.tick(150);
+  h.emit('processReset','click');await h.flush();
+  assert.equal(h.calls.native.at(-1).result,null);
+  assert.match(h.elements.get('processSettingsHint').textContent,/未启用/);
+  assert.equal(h.elements.get('processOriginal').checked,false);
+});
+
+test('comparison retains the same backdrop and blend, reuses pixels and labels a pending result honestly',async()=>{
+  const h=processingHarness();h.emit('processBackground','change',12);await h.enableGlow();
+  h.finish('job1');await h.tick(150);
+  assert.match(h.elements.get('processPreviewHint').textContent,/已更新/);
+  assert.equal(h.elements.get('processCompareLabel').textContent,'查看原合成');
+  h.emit('process_glow_strength_range','input',2);await h.flush();
+  assert.match(h.elements.get('processPreviewHint').textContent,/上次/);
+  h.elements.get('processOriginal').checked=true;h.emit('processOriginal','change');await h.flush();
+  assert.equal(h.calls.native.at(-1).result,null);
+  assert.equal(h.calls.native.at(-1).background,12);assert.equal(h.calls.native.at(-1).blend,'screen');
+  assert.match(h.elements.get('processPreviewHint').textContent,/原合成/);
+  h.elements.get('processOriginal').checked=false;h.emit('processOriginal','change');await h.flush();
+  assert.equal(h.calls.native.at(-1).result.image,'resultjob1');
+  assert.match(h.elements.get('processPreviewHint').textContent,/上次/);
+  await h.tick(180);h.finish('job2');await h.tick(150);
+  assert.match(h.elements.get('processPreviewHint').textContent,/已更新/);
+  assert.equal(h.calls.jobs.length,2);assert.equal(h.calls.uploads.length,1);
+});
+
+test('a superseded native render cannot announce that the latest parameters are ready',async()=>{
+  const h=processingHarness(),native=h.host.canvasStarPreview,gate=deferred();
+  h.host.canvasStarPreview=async(...args)=>{
+    if(args[1]?.image==='resultjob1') {
+      await gate.promise;
+      if(!args.at(-1)()){const error=new Error('Superseded');error.stale=true;throw error;}
+    }
+    return native(...args);
+  };
+  await h.enableGlow();h.finish('job1');await h.tick(150);
+  h.emit('process_glow_strength_range','input',2);await h.flush();
+  gate.resolve();await h.flush();
+  assert.doesNotMatch(h.calls.status.at(-1).message,/已更新/);
+  assert.doesNotMatch(h.elements.get('processPreviewHint').textContent,/已更新/);
+  await h.tick(180);h.finish('job2');await h.tick(150);
+  assert.match(h.elements.get('processPreviewHint').textContent,/已更新/);
+});
+
+test('failed native preview updates keep the previous picture labeled as failed and can retry',async()=>{
+  const h=processingHarness(),native=h.host.canvasStarPreview;
+  h.emit('processSource','change',11);await h.flush();
+  h.host.canvasStarPreview=async()=>{throw new Error('Native write failed');};
+  h.emit('processBlend','change','linearDodge');await h.flush();
+  assert.match(h.elements.get('processPreviewHint').textContent,/更新失败.*Native write failed/);
+  assert.equal(h.calls.status.at(-1).error,true);
+  h.host.canvasStarPreview=native;h.emit('processBlend','change','linearDodge');await h.flush();
+  assert.match(h.elements.get('processPreviewHint').textContent,/未启用加工/);
 });

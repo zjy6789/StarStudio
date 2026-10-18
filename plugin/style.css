@@ -57,5 +57,9 @@ footer { padding:5px; } progress { width:100%; height:8px; }
 .processToolBody { display:none; padding:4px 10px 10px; }
 .processToolBody.expanded { display:flex; flex-direction:column; }
 .processToolBody .hint { margin-bottom:5px; }
+.processAdvanced { display:none; }
+.processAdvanced.expanded { display:flex; flex-direction:column; }
+.processAdvancedToggle { margin:5px 0; text-align:left; }
+.processCompare { margin-top:10px; }
 #processCurve { height:75px; width:100%; background:#111; }
 #processPage > .row { flex-shrink:0; }

@@ -43,8 +43,11 @@
   <div id="processEncodingHint" class="hint"></div>
   <div class="hint">选择图层后自动在 Photoshop 新标签页中显示全分辨率预览。加工后创建新的星点图层并保留所选混合模式。</div>
   <div class="hint">选背景时创建独立合成组。输入及本会话关联的旧结果保留在不透明度为 0 的分组中，避免重复叠星并支持一次撤销；原层不合并。未选背景只输出星点。其他图层保留，透明区域仍可见下方内容。</div>
+  <div class="row"><button id="processNatural">自然控星</button><button id="processSoft">柔和亮星</button><button id="processReset">重置参数</button></div>
+  <div class="muted">预设会替换当前加工参数；自然控星只启用缩星，柔和亮星只启用辉光。可继续调整，重置恢复原效果。</div>
+  <div id="processSettingsHint" class="hint"></div>
   <div id="processTools"></div>
-  <div class="row"><button id="processReset">重置参数</button><label><input id="processOriginal" type="checkbox"> 查看原星点</label></div>
+  <label class="processCompare"><input id="processOriginal" type="checkbox"> <span id="processCompareLabel">查看原星点</span></label>
   <div id="processPreviewHint" class="muted">可随时切换背景、星点和混合模式。大半径辉光或星形修复计算时保留上一帧预览。</div>
   <button id="processExecute" class="primary execute">执行星点加工</button>
 </section>

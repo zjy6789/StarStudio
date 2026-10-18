@@ -217,3 +217,51 @@ def test_coma_cache_reuses_detection_for_strength(tmp_path, monkeypatch):
     settings['coma']['roundness'] = .8
     process_stars(image, settings, tmp_path, cache=cache)
     assert len(calls) == 3 and cache['coma']['correction'] is not correction
+
+
+@pytest.mark.parametrize('encoding', ['black', 'gray', 'signed'])
+def test_neutral_enabled_controls_preserve_source_and_negative_correction(tmp_path, encoding):
+    image = np.random.default_rng(73).random((37, 43, 4), dtype=np.float32)
+    if encoding == 'signed':
+        image[..., :3] -= .4
+    original = image.copy()
+    settings = {'coma': dict(enabled=True, strength=0),
+                'reduction': dict(enabled=True, strength=0),
+                'curve': dict(enabled=True, exposure=0),
+                'color': dict(enabled=True, saturation=1),
+                'glow': dict(enabled=True, strength=0)}
+    result, details = process_stars(image, settings, tmp_path, encoding=encoding)
+    # Existing float arithmetic can round neutral colour/encoding operations.
+    np.testing.assert_allclose(result, original, rtol=0, atol=1e-7)
+    np.testing.assert_array_equal(result[..., 3], original[..., 3])
+    np.testing.assert_array_equal(image, original)
+    negative = original[..., :3] < (.5 if encoding == 'gray' else 0)
+    np.testing.assert_array_equal(result[..., :3][negative], original[..., :3][negative])
+    assert details['reconstructedStars'] == 0
+
+
+@pytest.mark.parametrize('sigma', [.8, 1.5, 3])
+def test_natural_control_starting_radius_depends_on_star_pixels_not_canvas_size(tmp_path, sigma):
+    patches = []
+    for height, width in [(96, 96), (192, 256), (512, 768)]:
+        y, x = np.mgrid[:height, :width]
+        cy, cx = height//2, width//2
+        stars = .9*np.exp(-((x-cx)**2+(y-cy)**2)/(2*sigma*sigma))
+        stars += .004*np.exp(-((x-(cx-28))**2+(y-(cy-28))**2)/8)
+        image = np.concatenate([np.repeat(stars[..., None], 3, axis=2),
+                                np.ones((height, width, 1))], axis=2).astype(np.float32)
+        original = image.copy()
+        result, _ = process_stars(image, {'reduction': dict(enabled=True, strength=.25,
+                                  radius=1, threshold=.01, protect=.8)}, tmp_path)
+        before = image[cy-16:cy+17, cx-16:cx+17, :3]
+        after = result[cy-16:cy+17, cx-16:cx+17, :3]
+        loss = 1-after.sum()/before.sum()
+        assert 0 < loss < .25
+        assert result[cy, cx, 0] > image[cy, cx, 0]*.75
+        np.testing.assert_array_equal(result[cy-34:cy-21, cx-34:cx-21], image[cy-34:cy-21, cx-34:cx-21])
+        np.testing.assert_array_equal(result[..., 3], image[..., 3])
+        np.testing.assert_array_equal(image, original)
+        patches.append(after)
+    # Padding a photograph does not justify increasing its morphological radius.
+    for patch in patches[1:]:
+        np.testing.assert_array_equal(patch, patches[0])
