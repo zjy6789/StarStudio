@@ -44,11 +44,11 @@ source_estimate = float64(prepared) * scale + offset
 - [tifffile 官方内存映射文档](https://github.com/cgohlke/tifffile/blob/master/_autodocs/01-core-functions.md)：只读映射已有无压缩/瓦片TIFF，另建输出；使用现有开源TIFF实现而非自写文件编码。
 - [Adobe UXP Document](https://developer.adobe.com/photoshop/uxp/2022/ps_reference/classes/document/)：核对文档尺寸、bitsPerChannel与colorProfileName，避免自动换配置或降低位深。
 
-实际验证与未覆盖范围将在 [VALIDATION.md](../VALIDATION.md)记录；上述是实现前约定，不是已经通过的测试结论。
+上述是实现前约定；实际数值、原生验证与未覆盖范围见 [VALIDATION.md](../VALIDATION.md)，不将约定本身当作已通过的测试。
 
 ## 候选版本与回退
 
-T4在独立分支 `codex/linear-preparation-t4-20261018` 实现，功能和后续验收记录逐次提交。完整候选标签为 `checkpoint/0.8.0-candidate-20261018`；迭代前为 `checkpoint/0.7.1-candidate-20261018`。在工作区干净、已保存照片及当前修改的独立分支中，可按从新到旧顺序回退本轮范围：
+T4在独立分支 `codex/linear-preparation-t4-20261018` 实现：约定先提交为 `9f36df6`，功能提交为 `59eeefd`，功能标签为 `checkpoint/t4-linear-preparation-20261018`。完整候选标签为 `checkpoint/0.8.0-candidate-20261018`；迭代前为 `checkpoint/0.7.1-candidate-20261018`。在工作区干净、已保存照片及当前修改的独立分支中，可按从新到旧顺序回退本轮范围（包含验收记录，避免单独删除功能时发生文档冲突）：
 
 ```powershell
 git revert --no-commit checkpoint/0.7.1-candidate-20261018..checkpoint/0.8.0-candidate-20261018
@@ -56,3 +56,11 @@ git commit -m "Revert T4 candidate; retain T1 to T3"
 ```
 
 回退源码后需重新部署对应面板及后台；它不会删除或逆转已经创建/编辑的照片文件。已保存的母版始终独立保留。后续任务依赖T4时，需先按依赖顺序回退后续任务，不能无条件删除中间功能。
+
+本轮范围已在独立克隆实际反向应用，回退后Node116项通过，全部受版本控制文件恢复至 `16296e4`。源码回退不等于已经在Photoshop安装旧版，本轮不宣称已完成原生降级安装验证。
+
+## 0.8.0候选交付
+
+本机面板通过UPIA更新为0.8.0，18个安装文件与源码一致；原GPU程序位置和许可记录保留。后台从当前源码重新冻结，候选包为 `StarStudio-0.8.0-beta.1-Windows-x64-Setup.exe`。
+
+抽取包中的独立运行组件已实际执行新的检查/准备操作；副本逐值匹配源码算法、母版文件哈希不变、阶段为 `range-prepared-linear`，旧上传仍拒绝负值/超范围。健康版本0.8.0、普通曲线/alpha及自然空闲退出也通过。它不是干净电脑安装验证；本机开发面板使用源码环境，与抽取的冻结组件分别检查。GitHub同步源码和回退标签，本轮不自动发布新的公开Release。
