@@ -8,7 +8,7 @@ import tifffile
 from PIL import Image
 
 from backend.stack_quality import coverage_report
-from backend.stacking import stack
+from backend.stacking import stack, inspect
 from test_stack_layers import sequence
 
 
@@ -147,3 +147,47 @@ def test_sigma_counts_geometric_inputs_even_when_a_sample_is_rejected(tmp_path, 
     np.testing.assert_array_equal(tifffile.imread(output)[220, 220], [.125, .125, .125])
     count = np.asarray(png(result['quality']['png']))
     assert count[220, 220] == 3 and (count == 3).all()
+
+
+@pytest.mark.parametrize('index', [0, 2])
+def test_explicit_reference_drives_inspection_and_unwarped_output(tmp_path, sequence, index):
+    reference = sequence['paths'][index]
+    info = inspect(sequence['paths'], reference)
+    assert info['reference'] == index
+    result = stack(dict(sequence, reference=reference, referenceGround=True, format='tiff32',
+                        output=str(tmp_path/'chosen.tif')), tmp_path, lambda _: None, lambda _: None)
+    assert result['reference'] == reference
+    np.testing.assert_array_equal(result['alignment'][index]['matrix'], np.eye(3))
+    np.testing.assert_array_equal(tifffile.imread(result['layers']['reference']), tifffile.imread(reference))
+
+
+def test_foreign_reference_is_rejected_before_image_read(tmp_path, sequence, monkeypatch):
+    from backend import stacking
+    monkeypatch.setattr(stacking, 'read_frame', lambda *_: pytest.fail('must validate first'))
+    with pytest.raises(ValueError, match='基准.*所选'):
+        inspect(sequence['paths'], str(tmp_path/'not-selected.tif'))
+    with pytest.raises(ValueError, match='基准.*所选'):
+        stack(dict(sequence, reference=str(tmp_path/'not-selected.tif'), output=str(tmp_path/'out.tif'), format='tiff32'),
+              tmp_path, lambda _: None, lambda _: None)
+
+
+def test_bridge_failure_returns_exact_file_and_partial_records_without_saving(tmp_path, sequence, monkeypatch):
+    from backend import stacking
+    from backend.server import Store
+    from test_server import wait_for_job
+    calls = []
+    def matching(*_):
+        calls.append(True)
+        if len(calls) == 2:
+            raise ValueError('test correspondence failure')
+        return np.eye(3), dict(matches=12, rms=0., matrix=np.eye(3).tolist())
+    monkeypatch.setattr(stacking, 'register', matching)
+    output = tmp_path/'failure.tif'
+    store = Store(tmp_path)
+    result = wait_for_job(store, store.job(dict(sequence, op='stack', format='tiff32', output=str(output))))
+    assert result['state'] == 'error'
+    assert result['failedFile'] == sequence['paths'][2]
+    assert [row['file'] for row in result['alignment']] == sequence['paths'][:2]
+    assert not output.exists() and not list(tmp_path.glob('stack-*'))
+    inspection = wait_for_job(store, store.job(dict(op='stackInspect', paths=sequence['paths'], reference=sequence['paths'][0])))
+    assert inspection['result']['reference'] == 0

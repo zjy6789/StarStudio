@@ -94,7 +94,7 @@ class Store:
                         from .stacking import stack, inspect
                         if operation == "stackInspect":
                             job["message"] = "读取基准帧预览…"
-                            job["result"] = inspect(request["paths"])
+                            job["result"] = inspect(request["paths"],request.get("reference"))
                         else:
                             def message(text):
                                 job["message"] = text
@@ -255,6 +255,8 @@ class Store:
                 if operation in ("processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchCheck", "stretchRender", "stretchSave") and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
+                    if operation == "stack" and getattr(e,"failed_file",None):
+                        job.update(failedFile=e.failed_file,alignment=e.alignment)
                     job.update(state="error", error=str(e))
         threading.Thread(target=run, daemon=True).start()
         return key

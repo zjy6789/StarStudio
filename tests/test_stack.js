@@ -8,10 +8,11 @@ const plain=value=>JSON.parse(JSON.stringify(value));
 function panel() {
   const elements=new Map(),documentEvents=new Map(),calls={jobs:[],api:[],open:[],save:[],status:[],saved:[],layered:[],opened:[]};
   for(const match of fs.readFileSync('plugin/index.html','utf8').matchAll(/id="([^"]+)"/g)) {
-    const classes=new Set(),listeners=new Map();
+    const classes=new Set(),listeners=new Map(),menu={children:[],appendChild(item){this.children.push(item);},set innerHTML(value){this.children=[];}};
     elements.set(match[1],{value:'20',checked:false,selectedIndex:0,disabled:false,
       classList:{contains:name=>classes.has(name),toggle(name){classes.has(name)?classes.delete(name):classes.add(name);}},
       addEventListener(name,action){listeners.set(name,action);},listeners,
+      menu,querySelector:()=>menu,
       getBoundingClientRect:()=>({left:10,top:20,width:400,height:400}),
       removeAttribute(name){delete this[name];}});
   }
@@ -29,7 +30,7 @@ function panel() {
   const host={core:{executeAsModal:async action=>action({})},openStackLayers:async(...args)=>{
     calls.layered.push(args);if(h.layerFailure)throw h.layerFailure;return {doc:{id:99},cleanupWarning:''};}};
   const photoshop={action:{batchPlay:async commands=>{calls.open.push(plain(commands));return h.openResult;}}};
-  const context={module:{exports:{}},document:{getElementById:get,addEventListener:(name,action)=>documentEvents.set(name,action)},
+  const context={module:{exports:{}},document:{getElementById:get,createElement:()=>({}),addEventListener:(name,action)=>documentEvents.set(name,action)},
     btoa:s=>Buffer.from(s).toString('base64'),atob:s=>Buffer.from(s,'base64').toString('binary'),
     require:name=>name==='./host.js'?host:name==='uxp'?{storage:{localFileSystem:storage,formats:{binary:'binary'}}}:photoshop};
   vm.runInNewContext(fs.readFileSync('plugin/stack.js','utf8'),context);
@@ -40,7 +41,12 @@ function panel() {
     status:(message,error)=>calls.status.push({message,error}),
     job:async(request,started)=>{
       calls.jobs.push(plain(request));
-      if(request.op==='stackInspect')return plain(h.inspected);
+      if(request.op==='stackInspect'){
+        if(h.inspectFailure)throw h.inspectFailure;
+        const inspected=plain(h.inspected);inspected.paths=request.paths;
+        inspected.reference=request.reference && !h.ignoreReference?request.paths.indexOf(request.reference):Math.floor(request.paths.length/2);
+        inspected.name=request.paths[inspected.reference].split(/[\\/]/).pop();return inspected;
+      }
       started('stack-job');
       if(h.gate)await h.gate;
       if(h.failure)throw h.failure;
@@ -81,7 +87,7 @@ for(const [index,mode] of ['mean','median','sigma','maximum','minimum'].entries(
     h.get('stackScene').selectedIndex=1;h.emit('stackMode','change');
     assert.match(h.get('stackCache').textContent,index===1||index===2?/2 GB/:/逐张累积/);
     await h.execute();
-    assert.deepEqual(h.calls.jobs[1],{op:'stack',paths:h.inspected.paths,mode,landscape:true,mask:[],format:'dng',qualityReport:true,
+    assert.deepEqual(h.calls.jobs[1],{op:'stack',paths:h.inspected.paths,reference:h.inspected.paths[1],mode,landscape:true,mask:[],format:'dng',qualityReport:true,
       output:h.saved.nativePath,calibration:{dark:[],flat:[],bias:[],darkflat:[],linearTiff:false},photoshopOutput:h.saved.nativePath});
     assert.equal(h.calls.open.length,1);
     assert.equal(h.calls.open[0][0].null._path,'token:'+h.saved.nativePath);
@@ -243,4 +249,61 @@ test('older component has an explicit missing-report message without blocking sa
   const h=panel();await h.select();await h.execute();
   assert.match(h.get('stackCoverageHint').textContent,/没有返回完整覆盖报告.*更新后台/);
   assert.equal(h.get('stackCoverageSave').disabled,true);assert.equal(h.calls.open.length,1);
+});
+
+function paint(h) {
+  h.get('stackPaint').checked=true;
+  h.emit('stackMask','mousedown',{clientX:210,clientY:220,preventDefault(){}});
+  h.documentEvent('mouseup');
+}
+
+test('explicit reference reloads the preview and clears only the previous coordinate brush',async()=>{
+  const h=panel();await h.select();paint(h);
+  h.get('stackReferenceChoice').selectedIndex=0;await h.emit('stackReferenceChoice','change');
+  assert.equal(h.calls.jobs.at(-1).reference,h.inspected.paths[0]);
+  assert.match(h.get('stackSummary').textContent,/第 1 张 a.NEF/);
+  assert.deepEqual(h.get('stackReferenceChoice').menu.children.map(i=>i.textContent),['a.NEF','b.nef','c.nef']);
+  await h.execute();assert.equal(h.calls.jobs.at(-1).reference,h.inspected.paths[0]);
+  assert.deepEqual(h.calls.jobs.at(-1).mask,[]);
+});
+
+test('failed reference read keeps the old reference preview and painted exclusion',async()=>{
+  const h=panel();await h.select();paint(h);h.inspectFailure=new Error('decode failed');
+  h.get('stackReferenceChoice').selectedIndex=0;
+  await assert.rejects(h.emit('stackReferenceChoice','change'),/decode failed/);
+  assert.equal(h.get('stackReferenceChoice').selectedIndex,1);assert.match(h.get('stackSummary').textContent,/b.nef/);
+  h.inspectFailure=null;await h.execute();
+  assert.equal(h.calls.jobs.at(-1).reference,h.inspected.paths[1]);assert.equal(h.calls.jobs.at(-1).mask.length,1);
+});
+
+test('an older component silently ignoring a requested reference does not change the active group',async()=>{
+  const h=panel();await h.select();h.ignoreReference=true;
+  h.get('stackReferenceChoice').selectedIndex=0;
+  await assert.rejects(h.emit('stackReferenceChoice','change'),/后台未采用指定基准/);
+  assert.equal(h.get('stackReferenceChoice').selectedIndex,1);assert.match(h.get('stackSummary').textContent,/b.nef/);
+});
+
+test('failed frame is removed only after explicit action, retains the reference brush and can be restored',async()=>{
+  const h=panel();await h.select();paint(h);
+  h.failure=Object.assign(new Error('matching failed'),{failedFile:h.inspected.paths[0],alignment:[]});
+  await assert.rejects(h.execute(),/matching failed/);
+  assert.match(h.get('stackFailedHint').textContent,/a.NEF.*未自动丢帧/);
+  assert.equal(h.get('stackExcludeFailed').disabled,false);
+  await h.emit('stackExcludeFailed');assert.deepEqual(h.calls.jobs.at(-1).paths,h.inspected.paths.slice(1));
+  assert.equal(h.calls.jobs.at(-1).reference,h.inspected.paths[1]);assert.match(h.get('stackExcludedHint').textContent,/已排除 1 张.*原文件保留/);
+  h.failure=null;await h.execute();assert.equal(h.calls.jobs.at(-1).mask.length,1);
+  assert.deepEqual(h.calls.jobs.at(-1).paths,h.inspected.paths.slice(1));
+  await h.emit('stackRestoreFrames');assert.deepEqual(h.calls.jobs.at(-1).paths,h.inspected.paths);
+  assert.equal(h.get('stackRestoreFrames').disabled,true);
+});
+
+test('excluding a failed reference uses the remaining middle frame and will not drop below two',async()=>{
+  const h=panel();await h.select();paint(h);
+  h.failure=Object.assign(new Error('bad reference'),{failedFile:h.inspected.paths[1]});
+  await assert.rejects(h.execute(),/bad reference/);await h.emit('stackExcludeFailed');
+  assert.equal(h.calls.jobs.at(-1).reference,undefined);assert.match(h.get('stackSummary').textContent,/第 2 张 c.nef/);
+  h.failure=Object.assign(new Error('bad first'),{failedFile:h.inspected.paths[0]});
+  await assert.rejects(h.execute(),/bad first/);assert.deepEqual(h.calls.jobs.at(-1).mask,[]);
+  assert.equal(h.get('stackExcludeFailed').disabled,true);
+  await assert.rejects(h.emit('stackExcludeFailed'),/至少需要保留两张/);
 });

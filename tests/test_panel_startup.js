@@ -52,7 +52,7 @@ function panel(options={}) {
       if(route==='/starnet-info' && options.modelError)throw new Error(options.modelError);
       if(route==='/jobs')h.jobRequest=JSON.parse(requestOptions.body);
       const data=route==='/starnet-info'?{modern:true,license:'Terms',license_sha256:'revision-1'}:{ok:true,version:'0.6.0'};
-      return {ok:true,json:async()=>route==='/jobs'?{id:'extract-job'}:route==='/jobs/extract-job'?{state:'done',progress:1,result:{background:'bg',stars:'stars',provider:'test',starEncoding:h.jobRequest.preserveModelBackground?h.jobRequest.starEncoding:'black'}}:data};
+      return {ok:true,json:async()=>route==='/jobs'?{id:'extract-job'}:route==='/jobs/extract-job'?(h.jobState || {state:'done',progress:1,result:{background:'bg',stars:'stars',provider:'test',starEncoding:h.jobRequest.preserveModelBackground?h.jobRequest.starEncoding:'black'}}):data};
     },
     require:name=>{
       if(name==='./host.js')return host;
@@ -77,6 +77,16 @@ function panel(options={}) {
   h.timeout=async delay=>{assert.ok(timeouts.has(delay));const action=timeouts.get(delay);timeouts.delete(delay);action();await h.settle();};
   return h;
 }
+
+test('job error keeps the exact failed stack file and partial alignment records',async()=>{
+  const h=panel();await h.settle();
+  h.jobState={state:'error',progress:.4,error:'matching failed',failedFile:'D:\\input\\bad.NEF',
+    alignment:[{file:'D:\\input\\ok.NEF',matches:14,rms:.2}]};
+  await assert.rejects(h.stackOptions.job({op:'stack'}),error=>{
+    assert.equal(error.message,'matching failed');assert.equal(error.failedFile,h.jobState.failedFile);
+    assert.deepEqual(plain(error.alignment),h.jobState.alignment);return true;
+  });
+});
 
 test('the full panel starts on stack, restores model settings, and leaves star/background selection to the user',async()=>{
   const h=panel();await h.settle();

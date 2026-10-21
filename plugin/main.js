@@ -273,7 +273,11 @@ async function job(request, started=()=>{}) {
   while(true) {
     const state=await api('/jobs/'+id);
     report(state.progress);
-    if (state.state==='error') throw new Error(state.error);
+    if (state.state==='error') {
+      const error=new Error(state.error);
+      if(state.failedFile){error.failedFile=state.failedFile;error.alignment=state.alignment || [];}
+      throw error;
+    }
     if (state.state==='canceled') throw new Error('处理已取消。');
     if (state.state==='done') return state.result;
     status(state.state==='queued'?'等待本地处理…':(state.message || '本地处理…')+' '+Math.round(state.progress*100)+'%');

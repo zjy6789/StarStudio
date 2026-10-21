@@ -22,9 +22,27 @@ MODES = {'mean', 'median', 'sigma', 'maximum', 'minimum'}
 cv2.setNumThreads(min(8, cv2.getNumberOfCPUs()))
 
 
-def inspect(paths):
+class FrameAlignmentError(ValueError):
+    def __init__(self, file, reason, records):
+        super().__init__(f'{Path(file).name} 对齐失败：{reason}')
+        self.failed_file = file
+        self.alignment = list(records)
+
+
+def selected_reference(files, reference):
+    if reference is None:
+        return len(files)//2
+    if isinstance(reference,str):
+        selected = str(Path(reference).resolve()).casefold()
+        for index, file in enumerate(files):
+            if file.casefold() == selected:
+                return index
+    raise ValueError('基准帧必须是本组所选照片之一。')
+
+
+def inspect(paths, reference=None):
     files = ordered_paths(paths)
-    index = len(files)//2
+    index = selected_reference(files,reference)
     image, meta = read_frame(files[index])
     h, w = image.shape[:2]
     return {'paths':files, 'reference':index, 'name':Path(files[index]).name, 'width':w, 'height':h,
@@ -173,7 +191,7 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
         if str(photoshop_output).casefold() in inputs or photoshop_output.exists():
             raise ValueError(f'供 Photoshop 打开的 TIFF 已存在：{photoshop_output}。请使用另一个输出名称。')
     strokes = request.get('mask',[])
-    reference_index = len(files)//2
+    reference_index = selected_reference(files,request.get('reference'))
     started = time.monotonic()
     records = []
     def check():
@@ -209,7 +227,7 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
             fixed = stationary_points(catalogs[reference_index],catalogs[0],catalogs[len(files)-1])
         targets = moving_points(catalogs[reference_index],fixed)
         if len(targets) < 6:
-            raise ValueError('基准帧有效星点不足，请调整蒙版或检查照片。')
+            raise FrameAlignmentError(files[reference_index],'基准帧有效星点不足，请调整蒙版或检查照片。',records)
         reference_map = np.lib.format.open_memmap(work/'reference.npy',mode='w+',dtype='<f4',shape=shape)
         reference_map[:] = reference
         del reference
@@ -239,7 +257,7 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
                     try:
                         matrix, detail = register(moving_points(points,fixed),targets)
                     except Exception as e:
-                        raise ValueError(f'{Path(path).name} 对齐失败：{e}') from e
+                        raise FrameAlignmentError(path,str(e),records) from e
                 records.append({'file':path,**detail})
                 aligned = np.lib.format.open_memmap(work/f'frame-{i}.npy',mode='w+',dtype='<f4',shape=shape) if mode in {'median','sigma'} else None
                 if aligned is not None:

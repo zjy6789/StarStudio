@@ -107,6 +107,11 @@
   <div class="row"><button id="stackFiles">选择照片…</button><button id="stackFolder">选择文件夹…</button></div>
   <div id="stackSummary" class="hint">支持 RAW、TIFF、PNG、JPEG；无需打开原始素材。</div>
   <div id="stackNames" class="muted"></div>
+  <div class="row"><label>基准帧</label><sp-picker id="stackReferenceChoice"><sp-menu></sp-menu></sp-picker></div>
+  <div class="hint">默认选中间帧；更换基准会重新读取预览并清除旧画笔。</div>
+  <div id="stackFailedHint" class="hint"></div>
+  <div class="row"><button id="stackExcludeFailed" disabled>排除失败帧并重新读取</button><button id="stackRestoreFrames" disabled>撤回全部排除</button></div>
+  <div id="stackExcludedHint" class="muted"></div>
   <button id="stackCalibrationOptions" class="disclosure">校准场（可选） ▾</button>
   <div id="stackCalibrationSettings" class="collapsed">
     <div class="calibrationRow"><label>暗场</label><button id="stackDarkFiles">选择文件…</button><button id="stackDarkFolder">文件夹…</button><button id="stackDarkClear">清除</button><span id="stackDarkSummary" class="muted">未使用</span></div>
