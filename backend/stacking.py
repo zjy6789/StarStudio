@@ -15,6 +15,7 @@ from scipy.spatial import cKDTree
 
 from .stack_io import ordered_paths, read_frame, preview_png, write_result, RAW_EXTENSIONS
 from .calibration import Calibration, selected_paths
+from .stack_layers import layer_targets, save_layers
 
 MODES = {'mean', 'median', 'sigma', 'maximum', 'minimum'}
 cv2.setNumThreads(min(8, cv2.getNumberOfCPUs()))
@@ -156,8 +157,12 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
         raise ValueError('亮场素材不能同时作为校准场，请检查文件选择。')
     if str(output).casefold() in inputs:
         raise ValueError('输出不能覆盖堆栈素材。')
+    layered = request.get('referenceGround',False)
+    if not isinstance(layered,bool):
+        raise ValueError('参考地景选项必须为开关值。')
+    layer_files = layer_targets(output,format) if layered else None
     photoshop_output = output
-    if format in {'fits16','fits32'}:
+    if format in {'fits16','fits32'} and not layered:
         photoshop_output = Path(request.get('photoshopOutput',output.with_name(output.stem+'_PS.tif'))).resolve()
         if photoshop_output.suffix.lower() != '.tif' or not photoshop_output.parent.is_dir():
             raise ValueError('Photoshop 临时结果需要存在的文件夹与 .tif 扩展名。')
@@ -279,19 +284,23 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
                 message('保存堆栈结果…')
                 check()
                 calibration_info = calibration.summary() if calibration else None
-                encoding = write_result(output,result,meta,format,calibration=calibration_info)
-                if format in {'fits16','fits32'}:
-                    # Native Photoshop does not read FITS. Preserve the requested
-                    # astronomical file and open a full float32 temporary TIFF.
-                    check()
-                    write_result(photoshop_output,result,meta,'tiff32')
                 summary = {'output':str(output),'reference':files[reference_index],'frames':len(files),'mode':mode,
-                           'format':format,'shape':list(shape),'seconds':round(time.monotonic()-started,2),
+                           'format':format,'shape':list(shape),
                            'fixedFeatures':len(fixed),'coverageMin':int(count.min()),'coverageMax':int(count.max()),
-                           'encoding':encoding,'alignment':records,'color':meta,
+                           'alignment':records,'color':meta,
                            'resampling':'Lanczos4 once; reference is not resampled',
-                           'photoshopOutput':str(photoshop_output),'calibration':calibration_info}
-                output.with_suffix(output.suffix+'.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
+                           'calibration':calibration_info}
+                if layered:
+                    summary = save_layers(layer_files,result,reference_map,meta,format,summary,started,check)
+                else:
+                    encoding = write_result(output,result,meta,format,calibration=calibration_info)
+                    if format in {'fits16','fits32'}:
+                        # Native Photoshop does not read FITS. Preserve the requested
+                        # astronomical file and open a full float32 temporary TIFF.
+                        check()
+                        write_result(photoshop_output,result,meta,'tiff32')
+                    summary.update(encoding=encoding,photoshopOutput=str(photoshop_output),seconds=round(time.monotonic()-started,2))
+                    output.with_suffix(output.suffix+'.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
                 progress(1)
                 return summary
             finally:
