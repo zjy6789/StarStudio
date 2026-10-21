@@ -32,6 +32,7 @@ Star Studio 自有代码按 GPL-3.0-or-later 发布，完整许可在根目录 L
 | SciPy / scikit-image | 曲线、滤波及变换估计 | BSD-3-Clause · [SciPy](https://github.com/scipy/scipy) · [scikit-image](https://github.com/scikit-image/scikit-image) |
 | ccdproc 2.5.1 | 主校准场合成、偏置/暗场减法与平场校准 | BSD-3-Clause · [astropy/ccdproc](https://github.com/astropy/ccdproc/tree/2.5.1) |
 | Astropy 8.0.1 | CCDData、Sigma/MAD 统计与标准 FITS I/O | BSD-3-Clause · [astropy/astropy](https://github.com/astropy/astropy/tree/v8.0.1) |
+| PyWavelets 1.10.0 | scikit-image背景噪声估计的小波变换 | MIT AND BSD-3-Clause · [PyWavelets/pywt](https://github.com/PyWavelets/pywt)；完整wheel许可随包保存 |
 | ExifRead 3.5.1 | 拍摄参数与相机型号读取 | BSD-3-Clause · [ianare/exif-py](https://github.com/ianare/exif-py) |
 | Colour demosaicing | 校准后的浮点 Bayer Malvar 去马赛克 | BSD-3-Clause · [v0.2.6 源码](https://github.com/colour-science/colour-demosaicing/blob/v0.2.6/colour_demosaicing/bayer/demosaicing/malvar2004.py) |
 

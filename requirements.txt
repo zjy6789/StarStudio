@@ -8,6 +8,7 @@ opencv-python-headless==5.0.0.93
 sep==1.4.1
 scipy==1.18.1
 scikit-image==0.26.0
+PyWavelets==1.10.0
 astropy==8.0.1
 ccdproc==2.5.1
 ExifRead==3.5.1
