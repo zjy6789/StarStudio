@@ -31,6 +31,7 @@ class Store:
         self.preview_key = None
         self.processing_cache = {}
         self.background_models = {}
+        self.stretch_sources, self.stretch_results = {}, {}
 
     def create(self, w, h, c):
         if not (0 < w <= 65536 and 0 < h <= 65536 and w*h <= 250_000_000 and c in (1, 2, 3, 4)):
@@ -67,6 +68,8 @@ class Store:
 
     def delete(self, key):
         self.background_models.pop(key, None)
+        self.stretch_sources.pop(key, None)
+        self.stretch_results.pop(key, None)
         entry = self.images.pop(key)
         entry["data"]._mmap.close()
         (self.path / f"{key}.npy").unlink()
@@ -102,6 +105,48 @@ class Store:
                         canceled = lambda: job.get("cancel", False)
                         job["result"] = (inspect_master(request["path"], progress, canceled) if operation == "prepareInspect"
                                          else prepare_master(request, progress, canceled))
+                    elif operation in ("stretchInspect", "stretchRender", "stretchSave"):
+                        from .protected_stretch import inspect_prepared, prepared_data, check_source, render_stretch, save_stretch
+                        canceled = lambda: job.get("cancel", False)
+                        job["message"] = "读取线性准备副本并建议参数…" if operation == "stretchInspect" else "计算受保护拉伸…" if operation == "stretchRender" else "保存独立32位拉伸副本…"
+                        if operation == "stretchInspect":
+                            info = inspect_prepared(request["path"], request.get("confirmedLinear"), progress, canceled)
+                            image_id = None
+                            try:
+                                with prepared_data(info["path"]) as (image, record):
+                                    image_id = self.save(image)
+                                check_source(info)
+                                if canceled():
+                                    raise InterruptedError("读取已取消")
+                                self.stretch_sources[image_id] = info
+                                job["result"] = dict(info, image=image_id)
+                            except Exception:
+                                if image_id:
+                                    self.delete(image_id)
+                                raise
+                        elif operation == "stretchRender":
+                            source_id = request["image"]
+                            if source_id not in self.stretch_sources:
+                                raise ValueError("线性来源快照已失效，请重新读取准备副本。")
+                            source, info = self.get(source_id), self.stretch_sources[source_id]
+                            output_id = self.create(source.shape[1], source.shape[0], 3)
+                            try:
+                                entry = self.images[output_id]
+                                details = render_stretch(source, info, entry["data"], request["settings"], progress, canceled)
+                                entry["data"].flush()
+                                entry.update(ready=True, rows=source.shape[0])
+                                self.stretch_results[output_id] = dict(source=source_id, details=details)
+                                job["result"] = dict(details, image=output_id)
+                            except Exception:
+                                self.delete(output_id)
+                                raise
+                        else:
+                            result_id = request["image"]
+                            result = self.stretch_results.get(result_id)
+                            if not result or result["source"] not in self.stretch_sources:
+                                raise ValueError("拉伸结果或来源已失效，请重新预览后保存。")
+                            job["result"] = save_stretch(self.get(result_id), self.stretch_sources[result["source"]],
+                                                         result["details"], request["output"], canceled)
                     elif operation in ("backgroundFit", "backgroundRender"):
                         from .background import fit_background, render_background
                         image_id = request["image"]
@@ -201,7 +246,7 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                if operation in ("processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender") and job.get("cancel"):
+                if operation in ("processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchRender", "stretchSave") and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
                     job.update(state="error", error=str(e))
