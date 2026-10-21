@@ -29,6 +29,15 @@ test('failed selection write disposes data and rolls history back; wrong canvas 
   await assert.rejects(apply({width:2,height:1},'mask',{width:1,height:1},false,api,()=>{}),/尺寸/);assert.equal(started,1);
 });
 
+test('clipped effect writes opaque alpha without changing downloaded weights or colors',async()=>{
+  const source=new Float32Array([-.1,.2,1.5,.25]),before=source.slice();let written;
+  const context={module:{exports:{}},Float32Array,require:()=>({imaging:{
+    createImageDataFromBuffer:async(raw)=>{written=raw.slice();return {dispose(){}};},putPixels:async()=>{}}})};
+  vm.runInNewContext(fs.readFileSync('plugin/host.js','utf8'),context);
+  await context.module.exports.write({id:1},'effect',{size:32,width:1,height:1,components:4,colorSpace:'RGB',opaque:true},'effect',async()=>source.buffer,()=>{},{},{id:2});
+  assert.deepEqual(Array.from(written),[before[0],before[1],before[2],1]);assert.deepEqual(source,before);
+});
+
 test('a failed float input read deletes its incomplete upload',async()=>{
   const deleted=[],constants={BitsPerChannelType:{EIGHT:8,SIXTEEN:16},DocumentMode:{RGB:'RGB'}};
   const context={module:{exports:{}},require:()=>({constants,imaging:{getPixels:async()=>{throw new Error('read failed');}}}),Float32Array};

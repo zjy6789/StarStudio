@@ -53,6 +53,30 @@
   <label class="processCompare"><input id="backgroundReviewed" type="checkbox"> 已检查取样与模型，确认没有把主体当作背景</label>
   <div class="hint">输出到独立32位副本的新图层，保留原输入、ICC和合法负值/高光。原文档不变。32位显示可能与原8/16位不同，比较以副本中的原输入为准。</div>
   <div class="row"><button id="backgroundExecute" class="primary execute">创建背景校正副本</button><button id="backgroundCancel" disabled>取消</button></div>
+    <button id="colorOptions" class="disclosure">天空校色与主体颜色 ▾</button>
+    <div id="colorSettings" class="collapsed">
+      <div class="hint">使用上方选择的RGB照片或无星背景。用源照片选区指定可靠天空；这属于视觉校色，不是测光标定。极光、暖色天空和地景灯光可保留原色，先检查再应用。</div>
+      <div class="row"><button id="colorSample">用此处作为天空背景</button><button id="colorProtect">选区保护主体</button><button id="colorClear">清除选区记录</button></div>
+      <div id="colorMaskHint" class="hint"></div>
+      <label><input id="colorNeutralEnabled" type="checkbox"> 天空偏色修正</label>
+      <label>校色强度<input id="colorNeutral" type="number" min="0" max="1" step="0.05" value="0.5"></label>
+      <label><input id="colorBoostEnabled" type="checkbox"> 主体颜色增强</label>
+      <label>增强程度<input id="colorBoost" type="number" min="0" max="1" step="0.05" value="0.3"></label>
+      <button id="colorAdvancedOptions" class="disclosure">暗部与亮星保护 ▾</button>
+      <div id="colorAdvanced" class="collapsed">
+        <label>暗背景保护（散布倍数）<input id="colorBackgroundFactor" type="number" min="0" max="5" step="0.5" value="2"></label>
+        <label>亮星保护起点<input id="colorBright" type="number" min="0.1" max="0.94" step="0.05" value="0.7"></label>
+        <div class="muted">增强跳过负颜色/HDR像素并保护暗背景与亮星；主体保护选区内不改色。校色不自动保留未选入保护区的地景，请检查作用范围。</div>
+      </div>
+      <button id="colorGenerate">读取并生成颜色预览</button>
+      <img id="colorSamples" class="coveragePreview" alt="天空取样与主体保护位置示意">
+      <div id="colorSummary" class="hint">效果默认关闭；指定天空后读取建议。</div>
+      <div class="row"><sp-picker id="colorView"><sp-menu><sp-menu-item>颜色结果</sp-menu-item><sp-menu-item>原输入</sp-menu-item><sp-menu-item>作用范围（白色为调整区域）</sp-menu-item></sp-menu></sp-picker><button id="colorPreview">更新颜色预览</button></div>
+      <div id="colorPreviewHint" class="hint">在PS完整尺寸比较；取样缩略图只表示位置。</div>
+      <label><input id="colorReviewed" type="checkbox"> 已检查取样、原色与当前作用范围</label>
+      <div class="row"><button id="colorExecute">创建可调颜色副本</button><button id="colorCancel">取消计算</button></div>
+      <div class="muted">原文档不改写。结果副本保留原输入，效果层可调整不透明度；原alpha与嵌入ICC保留，32位数值不硬裁切。</div>
+    </div>
 </section>
 <section id="preparePage" class="page" role="tabpanel">
   <div class="row"><button id="prepareChoose">选择线性母版…</button><button id="prepareUseLast">使用刚保存的32位母版</button></div>

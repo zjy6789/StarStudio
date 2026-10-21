@@ -33,6 +33,7 @@ class Store:
         self.background_models = {}
         self.stretch_sources, self.stretch_results = {}, {}
         self.protection_masks = {}
+        self.color_models = {}
 
     def create(self, w, h, c, purpose="image"):
         if not (0 < w <= 65536 and 0 < h <= 65536 and w*h <= 250_000_000 and c in (1, 2, 3, 4)):
@@ -45,7 +46,7 @@ class Store:
     def get(self, key, purpose="image"):
         entry = self.images[key]
         if entry["purpose"] != purpose:
-            raise ValueError("蒙版专用来源不能用于普通图像作业")
+            raise ValueError("专用来源不能用于普通图像作业")
         if not entry["ready"]:
             raise ValueError("图像上传尚未完成")
         return entry["data"]
@@ -71,6 +72,7 @@ class Store:
 
     def delete(self, key):
         self.protection_masks.pop(key, None)
+        self.color_models.pop(key, None)
         self.background_models.pop(key, None)
         self.stretch_sources.pop(key, None)
         self.stretch_results.pop(key, None)
@@ -188,6 +190,35 @@ class Store:
                             except Exception:
                                 self.delete(output_id)
                                 raise
+                    elif operation in ("colorFit", "colorRender"):
+                        from .sky_color import fit_color, render_color
+                        image_id = request["image"]
+                        image = self.get(image_id, "color-source")
+                        canceled = lambda: job.get("cancel", False)
+                        if operation == "colorFit":
+                            self.color_models.pop(image_id, None)
+                            job["message"] = "分析指定天空背景颜色…"
+                            protection = request.get("protection")
+                            model = fit_color(image, self.get(request["sampling"]), self.get(protection) if protection else None, progress, canceled)
+                            self.color_models[image_id] = dict(model=model, protection=protection)
+                            job["result"] = model
+                        else:
+                            job["message"] = "计算完整尺寸受保护颜色…"
+                            if image_id not in self.color_models:
+                                raise ValueError("颜色模型已失效，请重新生成取样建议")
+                            cached = self.color_models[image_id]
+                            output_id = self.create(image.shape[1], image.shape[0], image.shape[2])
+                            try:
+                                entry = self.images[output_id]
+                                stats = render_color(image, cached["model"], entry["data"], request["options"],
+                                                     self.get(cached["protection"]) if cached["protection"] else None,
+                                                     request.get("view", "result"), progress, canceled)
+                                entry["data"].flush()
+                                entry.update(ready=True, rows=image.shape[0])
+                                job["result"] = dict(image=output_id, stats=stats)
+                            except Exception:
+                                self.delete(output_id)
+                                raise
                     elif operation in ("maskGenerate", "maskSave"):
                         from .protection_masks import make_mask, save_mask
                         canceled = lambda: job.get("cancel", False)
@@ -280,7 +311,7 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                if operation in ("maskGenerate", "maskSave", "stackCrop", "processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchCheck", "stretchRender", "stretchSave") and job.get("cancel"):
+                if operation in ("colorFit", "colorRender", "maskGenerate", "maskSave", "stackCrop", "processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchRender", "stretchSave") and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
                     if operation == "stack" and getattr(e,"failed_file",None):
@@ -337,13 +368,14 @@ class Handler(BaseHTTPRequestHandler):
             if length < 0 or length > 64*1024*1024:
                 raise ValueError("请求过大，请分块上传")
             body = self.rfile.read(length) if self.command == "POST" else b""
-            if self.command == "POST" and parts in (["images"], ["mask-sources"]):
+            image_purposes = {"images": "image", "mask-sources": "mask-source", "color-sources": "color-source"}
+            if self.command == "POST" and len(parts) == 1 and parts[0] in image_purposes:
                 r = json.loads(body)
                 self.reply({"id": store.create(int(r["width"]), int(r["height"]), int(r["components"]),
-                                              "mask-source" if parts[0] == "mask-sources" else "image")})
-            elif len(parts) == 2 and parts[0] in ("images", "mask-sources"):
+                                              image_purposes[parts[0]])})
+            elif len(parts) == 2 and parts[0] in image_purposes:
                 key = parts[1]
-                purpose = "mask-source" if parts[0] == "mask-sources" else "image"
+                purpose = image_purposes[parts[0]]
                 if store.images[key]["purpose"] != purpose:
                     raise ValueError("图像来源类型与入口不符")
                 if self.command == "POST":
@@ -355,7 +387,7 @@ class Handler(BaseHTTPRequestHandler):
                     if len(body) != rows*a.shape[1]*a.shape[2]*4:
                         raise ValueError("图像块字节数不符")
                     block = np.frombuffer(body, dtype="<f4").reshape(rows, a.shape[1], a.shape[2])
-                    if purpose == "mask-source":
+                    if purpose != "image":
                         from .protection_masks import validate_source
                         validate_source(block)
                     else:

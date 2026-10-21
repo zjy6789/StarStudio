@@ -107,6 +107,34 @@ for(const size of [8,16,32]) test(`${size}-bit background preview and output use
   assert.deepEqual(h.source.layers,sourceLayers);assert.equal(h.source.bitsPerChannel,size);assert.equal(h.original.opacity,originalOpacity);assert.equal(h.original.visible,true);
 });
 
+for(const size of [8,16,32]) test(`${size}-bit editable color preview/output keep a visible base and clipped opaque effect`,async()=>{
+  const h=setup(size);h.meta.size=32;h.meta.id='input';const sourceLayers=h.source.layers.slice();
+  const state=await h.host.canvasFloatPreview(null,'color',h.meta,'result',h.api,()=>{},'天空校色',true);
+  const preview=h.app.documents.find(d=>d.id===state.docID),base=preview.layers.find(l=>l.id===state.originalID),effect=preview.layers.find(l=>l.id===state.layerID);
+  assert.equal(base.visible,true);assert.equal(base.opacity,100);assert.equal(effect.isClippingMask,true);assert.equal(effect.opacity,100);
+  assert.deepEqual(preview.layers,[effect,base]);assert.equal(h.writes.at(-1).imageData.raw[3],1);
+  await h.host.canvasFloatPreview(state,null,h.meta,'original',h.api,()=>{},'天空校色',true);
+  assert.equal(effect.visible,false);assert.equal(base.visible,true);
+  const output=await h.host.applyFloatResult(h.meta,'color',h.api,()=>{},{label:'天空校色',suffix:'_sky_color',editableBase:true});
+  assert.equal(output.layers.length,2);assert.equal(output.layers[0].isClippingMask,true);assert.equal(output.layers[1].visible,true);
+  assert.equal(output.layers[0].opacity,100);assert.equal(output.layers[1].opacity,100);
+  assert.deepEqual(h.source.layers,sourceLayers);assert.equal(h.source.bitsPerChannel,size);assert.equal(output.profile,h.source.profile);
+});
+
+test('a rejected clipping relationship rolls the result back and closes only its own copy',async()=>{
+  const h=setup(32);h.meta.id='input';const duplicate=h.source.duplicate;
+  h.source.duplicate=async(...args)=>{
+    const copy=await duplicate(...args),create=copy.createLayer;
+    copy.createLayer=async options=>{
+      const layer=await create(options);
+      if(options.name.endsWith('_sky_color'))Object.defineProperty(layer,'isClippingMask',{set(){throw new Error('clipping rejected');}});
+      return layer;
+    };return copy;
+  };
+  await assert.rejects(h.host.applyFloatResult(h.meta,'color',h.api,()=>{},{suffix:'_sky_color',editableBase:true}),/clipping rejected/);
+  assert.equal(h.app.documents.length,1);assert.equal(h.app.documents[0],h.source);assert.ok(h.operations.includes('rollback'));
+});
+
 for(const size of [8,16,32]) test(`${size}-bit application isolates the chosen pair and replaces only related prior outputs`,async()=>{
   const h=setup(size),unrelated=h.layer(h.source,'unrelated user content');unrelated.visible=true;
   h.source.layers.push(unrelated);h.original.visible=true;h.backdrop.visible=true;

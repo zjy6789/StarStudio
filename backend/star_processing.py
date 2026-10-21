@@ -44,6 +44,15 @@ def bounded_color(rgb):
     return np.maximum(rgb, 0)/np.maximum(1, np.max(rgb, axis=2, keepdims=True))
 
 
+def adjust_color(rgb, saturation, protect):
+    """Existing working-RGB chroma edit, shared by stars and protected photo edits."""
+    lum = luminance(rgb)[..., None]
+    sat = 1+(saturation-1)*(1-smooth((lum-protect)/max(1-protect, .001)))
+    delta = (rgb-lum)*sat
+    allowance = np.where(delta >= 0, (1-lum)/np.maximum(delta, 1e-12), lum/np.maximum(-delta, 1e-12))
+    return lum+delta*np.minimum(1, np.min(allowance, axis=2, keepdims=True))
+
+
 def curve_values(values, curve):
     if not curve.get('enabled'):
         return values
@@ -205,12 +214,7 @@ def process_stars(image, settings, workdir, scale=1., progress=lambda x: None, c
     if color.get('enabled') and n == 3:
         saturation = number(color, 'saturation', 1, 0, 2)
         protect = number(color, 'protect', .85, .01, 1)
-        lum = luminance(rgb)[..., None]
-        sat = 1+(saturation-1)*(1-smooth((lum-protect)/max(1-protect, .001)))
-        delta = (rgb-lum)*sat
-        # Fit chroma to gamut by a common factor, preserving luminance and hue.
-        allowance = np.where(delta >= 0, (1-lum)/np.maximum(delta, 1e-12), lum/np.maximum(-delta, 1e-12))
-        rgb = lum+delta*np.minimum(1, np.min(allowance, axis=2, keepdims=True))
+        rgb = adjust_color(rgb, saturation, protect)
     progress(.7)
     glow = settings.get('glow', {})
     if glow.get('enabled'):

@@ -93,6 +93,11 @@ async function write(doc, key, meta, name, api, report, context, existingLayer) 
       const multiplier = meta.size===8?255:65535;
       for (let i=0; i<raw.length; i++) raw[i] = Math.round(floats[i]*multiplier);
     }
+    if(meta.opaque && meta.components%2===0) {
+      raw=raw.slice();
+      const alpha=meta.size===8?255:meta.size===16?65535:1;
+      for(let i=meta.components-1;i<raw.length;i+=meta.components)raw[i]=alpha;
+    }
     const imageData = await imaging.createImageDataFromBuffer(raw, {
       width:meta.width, height:rows, components:meta.components, colorSpace:meta.colorSpace,
       // Pixels are already in this document's space. An empty profile inherits
@@ -304,7 +309,7 @@ async function floatDocument(meta,title,api,report,context) {
   } catch(error) {await doc.closeWithoutSaving();throw error;}
 }
 
-async function canvasBackgroundPreview(state,key,meta,title,api,report,label='背景校正') {
+async function canvasBackgroundPreview(state,key,meta,title,api,report,label='背景校正',editableBase=false) {
   return core.executeAsModal(async context=>{
     let doc=app.documents.find(d=>d.id===state?.docID);
     let created=false;
@@ -315,9 +320,16 @@ async function canvasBackgroundPreview(state,key,meta,title,api,report,label='�
     const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'更新'+label+'预览'});
     try {
       let layer=doc.layers.find(l=>l.id===state.layerID);
-      if(key && key!==state.image) layer=await write(doc,key,{...meta,size:32},title,api,report,context,layer);
+      if(key && key!==state.image) layer=await write(doc,key,{...meta,size:32,opaque:editableBase},title,api,report,context,layer);
+      if(layer && editableBase) {
+        const original=doc.layers.find(l=>l.id===state.originalID);
+        original.opacity=100;original.fillOpacity=100;original.blendMode=constants.BlendMode.NORMAL;
+        layer.opacity=100;layer.fillOpacity=100;layer.blendMode=constants.BlendMode.NORMAL;
+        layer.move(original,constants.ElementPlacement.PLACEBEFORE);
+        layer.isClippingMask=true;
+      }
       if(layer) {layer.name=title;layer.visible=!!key;}
-      doc.layers.find(l=>l.id===state.originalID).visible=!key;
+      doc.layers.find(l=>l.id===state.originalID).visible=editableBase || !key;
       await context.hostControl.resumeHistory(history);
       app.activeDocument=doc;
       return {...state,layerID:layer?.id,image:key};
@@ -329,13 +341,18 @@ async function canvasBackgroundPreview(state,key,meta,title,api,report,label='�
   },{commandName:label+'预览'});
 }
 
-async function applyBackgroundResult(meta,key,api,report,{label='背景校正',suffix='_gradient_corrected'}={}) {
+async function applyBackgroundResult(meta,key,api,report,{label='背景校正',suffix='_gradient_corrected',editableBase=false}={}) {
   return core.executeAsModal(async context=>{
     const {doc,original}=await floatDocument(meta,meta.name+' · '+label,api,report,context);
     const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'应用'+label});
     try {
-      const layer=await write(doc,key,{...meta,size:32},meta.name+suffix,api,report,context);
-      await archiveLayer(doc,original);
+      const layer=await write(doc,key,{...meta,size:32,opaque:editableBase},meta.name+suffix,api,report,context);
+      if(editableBase) {
+        original.opacity=100;original.fillOpacity=100;original.blendMode=constants.BlendMode.NORMAL;
+        layer.opacity=100;layer.fillOpacity=100;layer.blendMode=constants.BlendMode.NORMAL;
+        layer.move(original,constants.ElementPlacement.PLACEBEFORE);
+        layer.isClippingMask=true;original.visible=true;
+      } else await archiveLayer(doc,original);
       await context.hostControl.resumeHistory(history);
       app.activeDocument=doc;return doc;
     } catch(error) {await context.hostControl.resumeHistory(history,false);await doc.closeWithoutSaving();throw error;}

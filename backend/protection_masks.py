@@ -12,9 +12,9 @@ import tifffile
 
 def validate_source(image):
     if image.ndim != 3 or image.shape[2] not in (1, 2, 3, 4) or not np.isfinite(image).all():
-        raise ValueError("蒙版来源必须为有限的灰度或 RGB 浮点数据")
+        raise ValueError("浮点来源必须为有限的灰度或 RGB 数据")
     if image.shape[2] in (2, 4) and ((image[..., -1] < 0).any() or (image[..., -1] > 1).any()):
-        raise ValueError("蒙版来源透明度必须在0到1之间")
+        raise ValueError("浮点来源透明度必须在0到1之间")
 
 
 def make_mask(image, options, progress=lambda x: None, canceled=lambda: False):
