@@ -344,6 +344,11 @@ async function openStackLayers(skyFile,referenceFile,summary) {
             throw new Error('堆栈分层输入尺寸、32位或线性颜色配置不符。');
         }
         doc=await opened[0].duplicate('Star Studio · 天空与参考地景',true);
+        app.activeDocument=doc;
+        if(doc.layers[0].isBackgroundLayer) {
+          const promoted=await action.batchPlay([{_obj:'set',_target:[{_ref:'layer',_property:'background'},{_ref:'document',_id:doc.id}],to:{_obj:'layer'},_options:{dialogOptions:'dontDisplay'}}],{});
+          if(promoted[0]?._obj==='error')throw new Error(promoted[0].message);
+        }
         const sky=doc.layers[0];sky.name='天空 · '+summary.frames+'帧对齐堆栈';sky.visible=true;
         const reference=await opened[1].layers[0].duplicate(doc);
         reference.name='参考地景 · 中间单帧（未对齐，未堆栈降噪）';reference.visible=false;
