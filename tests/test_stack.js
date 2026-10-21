@@ -6,7 +6,7 @@ const vm=require('node:vm');
 const file=name=>({name,isFile:true,nativePath:'D:\\fixtures\\'+name});
 const plain=value=>JSON.parse(JSON.stringify(value));
 function panel() {
-  const elements=new Map(),documentEvents=new Map(),calls={jobs:[],api:[],open:[],save:[],status:[],saved:[]};
+  const elements=new Map(),documentEvents=new Map(),calls={jobs:[],api:[],open:[],save:[],status:[],saved:[],layered:[],opened:[]};
   for(const match of fs.readFileSync('plugin/index.html','utf8').matchAll(/id="([^"]+)"/g)) {
     const classes=new Set(),listeners=new Map();
     elements.set(match[1],{value:'20',checked:false,selectedIndex:0,disabled:false,
@@ -26,7 +26,8 @@ function panel() {
     getTemporaryFolder:async()=>({createFile:async(name,options)=>{assert.equal(options.overwrite,false);return file(name);}}),
     createSessionToken:entry=>'token:'+entry.nativePath
   };
-  const host={core:{executeAsModal:async action=>action({})}};
+  const host={core:{executeAsModal:async action=>action({})},openStackLayers:async(...args)=>{
+    calls.layered.push(args);if(h.layerFailure)throw h.layerFailure;return {doc:{id:99},cleanupWarning:''};}};
   const photoshop={action:{batchPlay:async commands=>{calls.open.push(plain(commands));return h.openResult;}}};
   const context={module:{exports:{}},document:{getElementById:get,addEventListener:(name,action)=>documentEvents.set(name,action)},
     btoa:s=>Buffer.from(s).toString('base64'),
@@ -35,6 +36,7 @@ function panel() {
   h.ui=context.module.exports.setup({
     run:async action=>{h.ui.updateActions(true);try{return await action();}finally{h.ui.updateActions(false);}},
     api:async(...args)=>{calls.api.push(args);return {};},onSaved:(file,format)=>calls.saved.push({file,format}),
+    onLayeredOpened:doc=>{calls.opened.push(doc);},
     status:(message,error)=>calls.status.push({message,error}),
     job:async(request,started)=>{
       calls.jobs.push(plain(request));
@@ -42,7 +44,8 @@ function panel() {
       started('stack-job');
       if(h.gate)await h.gate;
       if(h.failure)throw h.failure;
-      return {frames:3,seconds:1.2,encoding:{scale:1},calibration:{warnings:[]}};
+      return {frames:3,seconds:1.2,encoding:{scale:1},calibration:{warnings:[]},
+        ...(request.referenceGround && !h.missingLayers?{layers:{depth:32,referenceResampled:false}}:{})};
     }
   });
   h.emit=(id,event='click',data={})=>get(id).listeners.get(event)?.(data);
@@ -155,4 +158,55 @@ test('save dialog cancellation and Photoshop open errors preserve a usable selec
   await assert.rejects(h.execute(),/堆栈已保存.*Cannot open/);
   assert.equal(h.get('stackExecute').disabled,false);assert.equal(h.get('stackCancel').disabled,true);
   h.openResult=[{}];await h.execute();assert.match(h.calls.status.at(-1).message,/已保存并打开/);
+});
+
+function resultFolder(h) {
+  const folder={nativePath:'D:\\results\\StarStudio_stack_new',entries:[],files:[],deleted:false,
+    createFile:async name=>{if(h.entryFailure)throw h.entryFailure;const entry={name,isFile:true,nativePath:folder.nativePath+'\\'+name};folder.files.push(entry);return entry;},
+    getEntries:async()=>folder.entries,delete:async()=>{assert.equal(folder.entries.length,0);folder.deleted=true;}};
+  h.folder={createFolder:async name=>{assert.match(name,/^StarStudio_stack_\d+$/);return folder;}};
+  h.get('stackReferenceGround').checked=true;
+  return folder;
+}
+
+for(const [index,format] of ['dng','tiff16','tiff32','fits16','fits32'].entries()) {
+  test(`${format} reference output retains master choice and opens float layers without ACR`,async()=>{
+    const h=panel();await h.select();const folder=resultFolder(h);h.get('stackFormat').selectedIndex=index;
+    await h.emit('stackReferenceGround','change');assert.match(h.get('stackReferenceGroundHint').textContent,/单帧/);
+    await h.execute();const request=h.calls.jobs.at(-1);
+    assert.equal(request.referenceGround,true);assert.equal(request.format,format);
+    assert.equal(h.calls.save.length,0);assert.equal(h.calls.open.length,0);assert.equal(h.calls.layered.length,1);
+    const [sky,reference]=h.calls.layered[0];assert.equal(reference.name,'StarStudio_reference_ground.tif');
+    assert.equal(sky.name,format==='tiff32'?'StarStudio_stack.tif':'StarStudio_sky_PS.tif');
+    assert.equal(request.photoshopOutput,sky.nativePath);assert.equal(folder.files.length,format==='tiff32'?2:3);
+    assert.equal(h.calls.saved[0].file,sky);assert.equal(h.calls.saved[0].format,'tiff32');
+    assert.equal(h.calls.opened[0].id,99);assert.equal(folder.deleted,false);
+    assert.match(h.calls.status.at(-1).message,/隐藏的单帧参考地景.*蒙版.*没有多帧降噪/s);
+  });
+}
+
+test('reference-folder cancellation leaves the input selection ready',async()=>{
+  const h=panel();await h.select();h.get('stackReferenceGround').checked=true;h.folder=null;
+  await h.execute();assert.equal(h.calls.jobs.length,1);assert.equal(h.get('stackExecute').disabled,false);
+});
+
+for(const stage of ['entry','job','occupied'])test(`reference output cleans only empty task folders on ${stage} failure`,async()=>{
+  const h=panel();await h.select();const folder=resultFolder(h);
+  if(stage==='entry')h.entryFailure=new Error('entry failed');else h.failure=new Error('job canceled');
+  if(stage==='occupied')folder.entries=[{name:'keep.tif'}];
+  await assert.rejects(h.execute(),/failed|canceled/);
+  assert.equal(folder.deleted,stage!=='occupied');assert.equal(h.get('stackReferenceGround').disabled,false);
+  assert.equal(h.calls.layered.length,0);
+});
+
+test('an old component cannot turn an incomplete layer result into successful output',async()=>{
+  const h=panel();await h.select();resultFolder(h);h.missingLayers=true;
+  await assert.rejects(h.execute(),/分层输出记录不完整.*新版后台/);assert.equal(h.calls.saved.length,0);assert.equal(h.calls.layered.length,0);
+});
+
+test('native opening failure reports the preserved output directory and allows retry',async()=>{
+  const h=panel();await h.select();const folder=resultFolder(h);h.layerFailure=new Error('native open failed');
+  await assert.rejects(h.execute(),/已保存于.*PS分层打开未完成.*native open failed/);
+  assert.equal(folder.deleted,false);assert.equal(h.get('stackExecute').disabled,false);
+  h.layerFailure=null;await h.execute();assert.equal(h.calls.opened.length,1);
 });

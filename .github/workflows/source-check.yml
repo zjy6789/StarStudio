@@ -28,4 +28,4 @@ jobs:
           }
           python -c "import json; from pathlib import Path; json.loads(Path('plugin/manifest.json').read_text()); assert not Path('plugin/bridge.json').exists()"
       - name: UXP pixel and processing regressions
-        run: node --test tests/test_star_processing.js tests/test_host_write.js tests/test_model_settings.js tests/test_star_canvas.js tests/test_extract.js tests/test_stack.js tests/test_panel_startup.js tests/test_linear_preparation.js tests/test_background.js tests/test_protected_stretch.js
+        run: node --test tests/test_star_processing.js tests/test_host_write.js tests/test_model_settings.js tests/test_star_canvas.js tests/test_extract.js tests/test_stack.js tests/test_stack_layers.js tests/test_panel_startup.js tests/test_linear_preparation.js tests/test_background.js tests/test_protected_stretch.js

@@ -408,7 +408,7 @@ $('extract').addEventListener('click',()=>run(extract));
 stretchUI=require('./protected-stretch.js').setup({run,api,job,status,report,isBusy:()=>busy,onSource:doc=>{photoStages.set(doc.id,'linear');refresh();documentSnapshot=snapshot();},onApplied:(doc,nonlinear)=>{photoStages.set(doc.id,nonlinear?'developed':'linear');refresh();documentSnapshot=snapshot();}});
 prepareUI=require('./linear-preparation.js').setup({run,api,job,status,isBusy:()=>busy,onPrepared:file=>stretchUI.setLastPrepared(file),onOpened:doc=>{photoStages.set(doc.id,'linear');refresh();}});
 backgroundUI=require('./background.js').setup({run,api,job,status,report,selectedLayer,useActive,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,stage:doc=>photoStages.get(doc.id) || 'unknown',onApplied:doc=>{photoStages.set(doc.id,'developed');refresh();documentSnapshot=snapshot();}});
-stackUI=require('./stack.js').setup({run,api,job,status,onSaved:(file,format)=>prepareUI.setLastMaster(file,format)});
+stackUI=require('./stack.js').setup({run,api,job,status,onSaved:(file,format)=>prepareUI.setLastMaster(file,format),onLayeredOpened:doc=>{photoStages.set(doc.id,'linear');refresh();documentSnapshot=snapshot();}});
 processUI=require('./star-processing.js').setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,starEncoding:(doc,layer)=>starRelation(doc,layer).encoding,refreshBlendModes:()=>refreshBlendModes(workingDocument()),ensureService,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,currentPage:()=>currentPage});
 syncLayers();
 setInterval(syncLayers,800);

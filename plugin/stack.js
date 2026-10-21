@@ -3,7 +3,7 @@ const fs=require('uxp').storage.localFileSystem;
 const $=id=>document.getElementById(id);
 const extensions=['arw','cr2','cr3','nef','nrw','raf','orf','rw2','pef','srw','dng','raw','tif','tiff','png','jpg','jpeg'];
 
-function setup({run,api,job,status,onSaved=()=>{}}) {
+function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
   let selection=null, strokes=[], drawing=null, activeJob=null;
   const calibration={dark:[],flat:[],bias:[],darkflat:[]};
   const modes=['mean','median','sigma','maximum','minimum'], formats=['dng','tiff16','tiff32','fits16','fits32'];
@@ -12,7 +12,7 @@ function setup({run,api,job,status,onSaved=()=>{}}) {
   function updateActions(busy=false) {
     $('stackExecute').disabled=busy || !selection;
     $('stackCancel').disabled=!activeJob;
-    for(const id of ['stackFiles','stackFolder','stackMode','stackScene','stackFormat','stackLinearTiff']) $(id).disabled=busy;
+    for(const id of ['stackFiles','stackFolder','stackMode','stackScene','stackFormat','stackLinearTiff','stackReferenceGround']) $(id).disabled=busy;
     for(const kind of Object.keys(calibration)) {
       const prefix='stack'+kind[0].toUpperCase()+kind.slice(1);
       for(const action of ['Files','Folder','Clear']) $(prefix+action).disabled=busy || (action==='Clear' && !calibration[kind].length);
@@ -64,6 +64,11 @@ function setup({run,api,job,status,onSaved=()=>{}}) {
     $('stackFormatHint').textContent=hints[$('stackFormat').selectedIndex];
   }
   $('stackFormat').addEventListener('change',formatHint);
+  $('stackReferenceGround').addEventListener('change',()=>{
+    $('stackReferenceGroundHint').textContent=$('stackReferenceGround').checked
+      ? '执行时选择结果文件夹。保留所选主格式，另存32位天空/参考TIFF；PS打开两层，单帧参考地景默认隐藏。显示后用蒙版融合，参考层没有多帧降噪。'
+      : '可选保留中间单帧供PS蒙版融合；参考地景没有多帧降噪，也不会自动融合地平线。';
+  });
   function cacheHint() {
     const disk=$('stackMode').selectedIndex===1 || $('stackMode').selectedIndex===2;
     $('stackCache').textContent=selection?(disk?'此模式需要约 '+selection.cacheGB+' GB 磁盘缓存；内存按块使用。':'逐张累积；无需保存全部对齐帧。'):'';
@@ -126,22 +131,49 @@ function setup({run,api,job,status,onSaved=()=>{}}) {
     if(!selection) throw new Error('请先选择照片。');
     if(calibration.darkflat.length && !calibration.flat.length) throw new Error('平暗场用于校准平场；请选择平场或清除平暗场。');
     const format=formats[$('stackFormat').selectedIndex],extension=format==='dng'?'dng':format.startsWith('fits')?'fit':'tif';
-    const file=await fs.getFileForSaving('StarStudio_stack.'+extension,{types:[extension]});
-    if(!file) return;
-    let opening=file;
-    if(format.startsWith('fits')) {
+    const layered=$('stackReferenceGround').checked;
+    let folder,file,opening,reference,result;
+    try {
+    if(layered) {
+      status('选择结果文件夹，将创建独立子目录并保留主文件及32位分层素材。');
+      const parent=await fs.getFolder();if(!parent)return;
+      folder=await parent.createFolder('StarStudio_stack_'+Date.now());
+      file=await folder.createFile('StarStudio_stack.'+extension,{overwrite:false});
+      opening=format==='tiff32'?file:await folder.createFile('StarStudio_sky_PS.tif',{overwrite:false});
+      reference=await folder.createFile('StarStudio_reference_ground.tif',{overwrite:false});
+    } else {
+      file=await fs.getFileForSaving('StarStudio_stack.'+extension,{types:[extension]});
+      if(!file)return;opening=file;
+    }
+    if(format.startsWith('fits') && !layered) {
       const temporary=await fs.getTemporaryFolder();
       opening=await temporary.createFile('StarStudio_stack_'+Date.now()+'.tif',{overwrite:false});
     }
-    let result;
-    try {
       result=await job({op:'stack',paths:selection.paths,mode:modes[$('stackMode').selectedIndex],
         landscape:$('stackScene').selectedIndex===1,mask:strokes,format,output:file.nativePath,
         calibration:{...calibration,linearTiff:$('stackLinearTiff').checked},
-        photoshopOutput:opening.nativePath},id=>{activeJob=id;updateActions(true);});
+        photoshopOutput:opening.nativePath,...(layered?{referenceGround:true}:{})},id=>{activeJob=id;updateActions(true);});
+    } catch(error) {
+      if(folder) {
+        let retained=true;
+        try {if(!(await folder.getEntries()).length){await folder.delete();retained=false;}}catch(e){console.error(e);}
+        if(retained)throw new Error(error.message+'；请检查已保留的本次目录：'+folder.nativePath);
+      }
+      throw error;
     } finally {activeJob=null;updateActions(true);}
-    onSaved(file,format);
+    if(layered && (!result.layers || result.layers.depth!==32 || result.layers.referenceResampled!==false))
+      throw new Error('主文件可能已保存于 '+folder.nativePath+'；分层输出记录不完整，请重新打开面板并确认使用新版后台组件。');
+    onSaved(layered?opening:file,layered?'tiff32':format);
     status('堆栈已保存，正在 Photoshop 中打开…');
+    if(layered) {
+      let opened;
+      try {opened=await host.openStackLayers(opening,reference,result);}
+      catch(error){throw new Error('堆栈与分层素材已保存于 '+folder.nativePath+'；PS分层打开未完成：'+error.message);}
+      try {onLayeredOpened(opened.doc);}
+      catch(error){throw new Error('分层文档已创建，面板状态更新未完成；文件保留于 '+folder.nativePath+'：'+error.message);}
+      status('已保存 '+result.frames+' 帧堆栈与32位分层素材：'+folder.nativePath+'。\nPS已打开天空与隐藏的单帧参考地景。显示参考层并添加蒙版融合；参考层没有多帧降噪。请另存PSD以保留图层。'+(opened.cleanupWarning?'\n'+opened.cleanupWarning:'')+(result.calibration?.warnings?.length?'\n校准提示：'+result.calibration.warnings.join('\n'):''));
+      return;
+    }
     await host.core.executeAsModal(async()=>{
       const response=await require('photoshop').action.batchPlay([{_obj:'open',null:{_path:fs.createSessionToken(opening),_kind:'local'},_options:{dialogOptions:'dontDisplay'}}],{});
       if(response[0]?._obj==='error') throw new Error('堆栈已保存，但 Photoshop 打开失败：'+response[0].message);

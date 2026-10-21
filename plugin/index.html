@@ -122,6 +122,8 @@
   <div id="stackMaskEditor"><img id="stackReference"><img id="stackMask"></div>
   <div class="row"><label><input type="checkbox" id="stackPaint"> 画笔排除对齐区域</label><span>笔刷</span><input id="stackBrush" type="range" min="10" max="160" value="60"><button id="stackClearMask">清除蒙版</button></div>
   <div class="hint">地景模式和红色蒙版仅排除对齐特征，不删除像素，也不保留清晰地景。整张照片随天空对齐，地景可能拖花。</div>
+  <label class="processCompare"><input id="stackReferenceGround" type="checkbox"> 同时保留参考地景，创建天空与地景两层</label>
+  <div id="stackReferenceGroundHint" class="hint">可选保留中间单帧供PS蒙版融合；参考地景没有多帧降噪，也不会自动融合地平线。</div>
   <div class="row stackSettings"><div><label>保存格式</label><sp-picker id="stackFormat"><sp-menu><sp-menu-item>DNG（32 位线性浮点，默认）</sp-menu-item><sp-menu-item>16 位 TIFF</sp-menu-item><sp-menu-item>32 位浮点 TIFF</sp-menu-item><sp-menu-item>16 位 FITS（缩放整数）</sp-menu-item><sp-menu-item>32 位浮点 FITS</sp-menu-item></sp-menu></sp-picker></div></div>
   <div id="stackFormatHint" class="hint">DNG 保留 32 位浮点；Photoshop 打开位深由 Camera Raw 设置决定。</div>
   <div id="stackCache" class="muted"></div>

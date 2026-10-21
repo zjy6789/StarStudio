@@ -324,6 +324,54 @@ async function applyBackgroundResult(meta,key,api,report,{label='背景校正',s
   },{commandName:'创建32位'+label+'副本'});
 }
 
+async function openStackLayers(skyFile,referenceFile,summary) {
+  const fs=require('uxp').storage.localFileSystem,action=require('photoshop').action;
+  let folder,result,error,cleanupWarning='';const copies=[];
+  try {
+    folder=await (await fs.getTemporaryFolder()).createFolder('starstudio-stack-'+Date.now());
+    for(const file of [skyFile,referenceFile])copies.push(await file.copyTo(folder));
+    result=await core.executeAsModal(async()=>{
+      const previous=app.activeDocument,before=new Set(Array.from(app.documents,d=>d.id)),opened=[];
+      let doc,complete=false;
+      try {
+        for(const file of copies) {
+          const response=await action.batchPlay([{_obj:'open',null:{_path:fs.createSessionToken(file),_kind:'local'},_options:{dialogOptions:'dontDisplay'}}],{});
+          if(response[0]?._obj==='error')throw new Error(response[0].message);
+          const input=app.activeDocument;
+          if(before.has(input.id))throw new Error('未能独立打开堆栈临时副本；用户文档未修改。');
+          opened.push(input);
+          if(input.width!==summary.shape[1] || input.height!==summary.shape[0] || input.bitsPerChannel!==constants.BitsPerChannelType.THIRTYTWO || input.mode!==constants.DocumentMode.RGB || input.colorProfileName!==summary.layers.profile)
+            throw new Error('堆栈分层输入尺寸、32位或线性颜色配置不符。');
+        }
+        doc=await opened[0].duplicate('Star Studio · 天空与参考地景',true);
+        const sky=doc.layers[0];sky.name='天空 · '+summary.frames+'帧对齐堆栈';sky.visible=true;
+        const reference=await opened[1].layers[0].duplicate(doc);
+        reference.name='参考地景 · 中间单帧（未对齐，未堆栈降噪）';reference.visible=false;
+        reference.opacity=100;reference.blendMode=constants.BlendMode.NORMAL;
+        reference.move(sky,constants.ElementPlacement.PLACEBEFORE);
+        app.activeDocument=doc;
+        const selected=await action.batchPlay([{_obj:'select',_target:[{_ref:'layer',_id:sky.id}],makeVisible:false}],{});
+        if(selected[0]?._obj==='error')throw new Error(selected[0].message);
+        complete=true;return doc;
+      } finally {
+        if(!complete && doc)await doc.closeWithoutSaving();
+        for(const input of opened)await input.closeWithoutSaving();
+        if(complete)app.activeDocument=doc;
+        else if(previous && app.documents.some(d=>d.id===previous.id))app.activeDocument=previous;
+      }
+    },{commandName:'打开天空与参考地景分层'});
+  } catch(e) {error=e;}
+  finally {
+    if(folder)try {
+      for(const copy of copies)await copy.delete();
+      if((await folder.getEntries()).length)throw new Error('临时目录含其他条目，已保留。');
+      await folder.delete();
+    }catch(e){cleanupWarning='临时副本清理未完成：'+e.message;}
+  }
+  if(error)throw new Error(error.message+(cleanupWarning?'；'+cleanupWarning:''));
+  return {doc:result,cleanupWarning};
+}
+
 function findLayer(doc, id) {
   function walk(items) {
     for(const layer of items) {
@@ -374,4 +422,4 @@ async function applyStarResult({doc,source,background,blend,result,meta,previous
   });
 }
 
-module.exports = {app, core, imaging, constants, layers, findLayer, archiveLayer, documentInfo, upload, write, starBlendModes, starEncoding, setStarBlendMode, canvasStarPreview, transaction, applyStarResult, uploadSelection, uploadBackground, canvasBackgroundPreview, applyBackgroundResult, canvasFloatPreview:canvasBackgroundPreview, applyFloatResult:applyBackgroundResult};
+module.exports = {app, core, imaging, constants, layers, findLayer, archiveLayer, documentInfo, upload, write, starBlendModes, starEncoding, setStarBlendMode, canvasStarPreview, transaction, applyStarResult, uploadSelection, uploadBackground, canvasBackgroundPreview, applyBackgroundResult, canvasFloatPreview:canvasBackgroundPreview, applyFloatResult:applyBackgroundResult, openStackLayers};
