@@ -40,7 +40,7 @@ def archive(source, target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--tag', default='v0.9.0-beta.1')
+    parser.add_argument('--tag', default='v0.10.0-beta.1')
     parser.add_argument('--skip-freeze', action='store_true', help='Reuse an existing frozen runtime')
     args = parser.parse_args()
     if sys.platform != 'win32':

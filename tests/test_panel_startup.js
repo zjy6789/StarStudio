@@ -61,6 +61,7 @@ function panel(options={}) {
       if(name==='./stack.js')return {setup:options=>{stackSetups++;h.stackOptions=options;return {updateActions(){}};}};
       if(name==='./linear-preparation.js')return {setup:options=>{prepareSetups++;h.prepareOptions=options;return {updateActions(){},setLastMaster:(file,format)=>{h.lastMaster={file,format};}};}};
       if(name==='./background.js')return {setup:options=>{h.backgroundOptions=options;return {updateActions(){},sync(){},previewDocumentID:()=>h.backgroundPreviewID};}};
+      if(name==='./protected-stretch.js')return {setup:options=>{h.stretchOptions=options;return {updateActions(){},previewDocumentID:()=>h.stretchPreviewID,setLastPrepared:file=>{h.lastPrepared=file;}};}};
       if(name==='./star-processing.js')return {setup:options=>{processSetups++;h.processOptions=options;return processUI;}};
       throw new Error('Unexpected require '+name);
     }
@@ -108,6 +109,23 @@ test('background preview remains associated with its source and an applied copy 
   assert.match(h.get('documentName').textContent,/corrected/);
 });
 
+test('T4 hands the saved copy to T6 explicitly and stretch output stages distinguish identity from nonlinear',async()=>{
+  const h=panel();await h.settle();await h.emit('stretchTab');assert.equal(h.get('stretchPage').classList.contains('active'),true);
+  const file={name:'prepared.tif'};h.prepareOptions.onPrepared(file);assert.equal(h.lastPrepared,file);
+  const source={...h.doc,id:80,title:'Temporary prepared source',bitsPerChannel:32};h.host.app.documents.push(source);h.host.app.activeDocument=source;
+  h.stretchOptions.onSource(source);assert.equal(h.get('photoStage').selectedIndex,2);
+  const result={...source,id:81,title:'Stretched result'};h.host.app.documents.push(result);h.host.app.activeDocument=result;
+  h.stretchOptions.onApplied(result,true);assert.equal(h.get('photoStage').selectedIndex,1);
+  h.stretchOptions.onApplied(result,false);assert.equal(h.get('photoStage').selectedIndex,2);
+});
+
+test('display-only T6 preview cannot enter the developed-photo extraction route',async()=>{
+  const h=panel({saved:{executable:'D:\\engine\\starnet2.exe',acceptedLicenses:['revision-1'],stride:0,decomposition:0}});await h.settle();
+  h.stretchOptions.onSource(h.doc);h.stretchPreviewID=88;const preview={id:88};h.host.app.documents.push(preview);h.host.app.activeDocument=preview;
+  await h.tick(800);await h.emit('extract');assert.match(h.get('status').textContent,/线性堆栈母版/);
+  assert.ok(!h.calls.requests.some(r=>r.route==='/jobs'));assert.equal(h.get('photoStage').selectedIndex,2);
+});
+
 test('start guidance offers a current-photo path without forcing a stack and works without a document',async()=>{
   const h=panel({noDocument:true,saved:{executable:'',stride:0,decomposition:0}});await h.settle();
   assert.equal(h.get('startCurrent').disabled,true);assert.equal(h.get('photoStage').disabled,true);
@@ -141,7 +159,7 @@ test('stage confirmation belongs to the source document and is never inferred fr
   await h.tick(800);assert.equal(h.get('photoStage').selectedIndex,0);
   h.get('photoStage').selectedIndex=2;await h.emit('photoStage','change');
   h.previewID=90;h.host.app.documents.push({id:90});h.host.app.activeDocument={id:90};await h.tick(800);
-  assert.equal(h.get('photoStage').selectedIndex,2);assert.match(h.get('inputHint').textContent,/来源：Linear master.*加工预览/);
+  assert.equal(h.get('photoStage').selectedIndex,2);assert.match(h.get('inputHint').textContent,/来源：Linear master.*临时预览/);
   h.host.app.activeDocument=h.doc;await h.tick(800);assert.equal(h.get('photoStage').selectedIndex,1);
 });
 

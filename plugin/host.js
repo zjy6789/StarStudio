@@ -272,9 +272,9 @@ async function uploadBackground(doc,layer,api,report) {
   }
 }
 
-async function backgroundDocument(meta,title,api,report,context) {
+async function floatDocument(meta,title,api,report,context) {
   const source=app.documents.find(d=>d.id===meta.docID);
-  if(!source) throw new Error('背景来源照片已关闭。');
+  if(!source) throw new Error('浮点输入文档已关闭；请重新读取输入。');
   const doc=await source.duplicate(title,true);
   try {
     doc.bitsPerChannel=constants.BitsPerChannelType.THIRTYTWO;
@@ -286,15 +286,15 @@ async function backgroundDocument(meta,title,api,report,context) {
   } catch(error) {await doc.closeWithoutSaving();throw error;}
 }
 
-async function canvasBackgroundPreview(state,key,meta,title,api,report) {
+async function canvasBackgroundPreview(state,key,meta,title,api,report,label='背景校正') {
   return core.executeAsModal(async context=>{
     let doc=app.documents.find(d=>d.id===state?.docID);
     let created=false;
     if(!doc) {
-      const made=await backgroundDocument(meta,'背景校正预览 · '+meta.name,api,report,context);
+      const made=await floatDocument(meta,label+'预览 · '+meta.name,api,report,context);
       doc=made.doc;state={docID:doc.id,originalID:made.original.id};created=true;
     }
-    const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'更新背景校正预览'});
+    const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'更新'+label+'预览'});
     try {
       let layer=doc.layers.find(l=>l.id===state.layerID);
       if(key && key!==state.image) layer=await write(doc,key,{...meta,size:32},title,api,report,context,layer);
@@ -308,20 +308,20 @@ async function canvasBackgroundPreview(state,key,meta,title,api,report) {
       if(created) await doc.closeWithoutSaving();
       throw error;
     }
-  },{commandName:'背景校正预览'});
+  },{commandName:label+'预览'});
 }
 
-async function applyBackgroundResult(meta,key,api,report) {
+async function applyBackgroundResult(meta,key,api,report,{label='背景校正',suffix='_gradient_corrected'}={}) {
   return core.executeAsModal(async context=>{
-    const {doc,original}=await backgroundDocument(meta,meta.name+' · 背景校正',api,report,context);
-    const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'应用背景梯度校正'});
+    const {doc,original}=await floatDocument(meta,meta.name+' · '+label,api,report,context);
+    const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'应用'+label});
     try {
-      const layer=await write(doc,key,{...meta,size:32},meta.name+'_gradient_corrected',api,report,context);
+      const layer=await write(doc,key,{...meta,size:32},meta.name+suffix,api,report,context);
       await archiveLayer(doc,original);
       await context.hostControl.resumeHistory(history);
       app.activeDocument=doc;return doc;
     } catch(error) {await context.hostControl.resumeHistory(history,false);await doc.closeWithoutSaving();throw error;}
-  },{commandName:'创建32位背景校正副本'});
+  },{commandName:'创建32位'+label+'副本'});
 }
 
 function findLayer(doc, id) {
@@ -374,4 +374,4 @@ async function applyStarResult({doc,source,background,blend,result,meta,previous
   });
 }
 
-module.exports = {app, core, imaging, constants, layers, findLayer, archiveLayer, documentInfo, upload, write, starBlendModes, starEncoding, setStarBlendMode, canvasStarPreview, transaction, applyStarResult, uploadSelection, uploadBackground, canvasBackgroundPreview, applyBackgroundResult};
+module.exports = {app, core, imaging, constants, layers, findLayer, archiveLayer, documentInfo, upload, write, starBlendModes, starEncoding, setStarBlendMode, canvasStarPreview, transaction, applyStarResult, uploadSelection, uploadBackground, canvasBackgroundPreview, applyBackgroundResult, canvasFloatPreview:canvasBackgroundPreview, applyFloatResult:applyBackgroundResult};

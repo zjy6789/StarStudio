@@ -2,7 +2,7 @@ const host=require('./host.js');
 const fs=require('uxp').storage.localFileSystem;
 const $=id=>document.getElementById(id);
 
-function setup({run,api,job,status,onOpened=()=>{},isBusy=()=>false}) {
+function setup({run,api,job,status,onOpened=()=>{},onPrepared=()=>{},isBusy=()=>false}) {
   let selected=null,lastMaster=null,activeJob=null;
   function updateActions(busy=isBusy()) {
     $('prepareChoose').disabled=busy;
@@ -62,8 +62,9 @@ function setup({run,api,job,status,onOpened=()=>{},isBusy=()=>false}) {
       fingerprint:selected.info.fingerprint,confirmedLinear:true});
     const rounding=result.metadata.rounding;
     $('prepareResult').textContent='已保存 '+file.name+'。范围准备已应用；仍为线性，未拉伸，未启用额外显示提亮。\n浮点舍入改变 '+rounding.changedChannels+' 个通道值，最大重建绝对误差 '+rounding.maxAbsError.toExponential(4)+'。映射与误差已写入TIFF描述；副本不能替代原母版。';
+    onPrepared(file);
     await open(file,result);
-    status('已创建并打开32位范围准备副本；仍为线性。请保留母版，后续在独立副本显影后再去星。');
+    status('已创建并打开32位范围准备副本；仍为线性。可到「线性提亮」显式使用刚准备副本，先预览再保存应用。');
   }));
   updateActions();
   return {updateActions,setLastMaster(file,format){lastMaster=format==='tiff32'?file:null;updateActions();}};

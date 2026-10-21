@@ -105,10 +105,11 @@ class Store:
                         canceled = lambda: job.get("cancel", False)
                         job["result"] = (inspect_master(request["path"], progress, canceled) if operation == "prepareInspect"
                                          else prepare_master(request, progress, canceled))
-                    elif operation in ("stretchInspect", "stretchRender", "stretchSave"):
+                    elif operation in ("stretchInspect", "stretchCheck", "stretchRender", "stretchSave"):
                         from .protected_stretch import inspect_prepared, prepared_data, check_source, render_stretch, save_stretch
                         canceled = lambda: job.get("cancel", False)
-                        job["message"] = "读取线性准备副本并建议参数…" if operation == "stretchInspect" else "计算受保护拉伸…" if operation == "stretchRender" else "保存独立32位拉伸副本…"
+                        job["message"] = {"stretchInspect": "读取线性准备副本并建议参数…", "stretchCheck": "检查准备副本是否变化…",
+                                          "stretchRender": "计算受保护拉伸…", "stretchSave": "保存独立32位拉伸副本…"}[operation]
                         if operation == "stretchInspect":
                             info = inspect_prepared(request["path"], request.get("confirmedLinear"), progress, canceled)
                             image_id = None
@@ -124,6 +125,11 @@ class Store:
                                 if image_id:
                                     self.delete(image_id)
                                 raise
+                        elif operation == "stretchCheck":
+                            if request["image"] not in self.stretch_sources:
+                                raise ValueError("线性来源快照已失效，请重新读取准备副本。")
+                            check_source(self.stretch_sources[request["image"]])
+                            job["result"] = {"ok": True}
                         elif operation == "stretchRender":
                             source_id = request["image"]
                             if source_id not in self.stretch_sources:
@@ -246,7 +252,7 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                if operation in ("processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchRender", "stretchSave") and job.get("cancel"):
+                if operation in ("processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchCheck", "stretchRender", "stretchSave") and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
                     job.update(state="error", error=str(e))

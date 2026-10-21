@@ -6,7 +6,7 @@ let docID = null, layerList = [], busy = false, updatingPickers=false;
 let currentPage='stack', serviceReady=false, documentSnapshot=null, panelVisible=true;
 let settingsFile=null, settingsWrite=Promise.resolve();
 let modelInfo=null, acceptedLicenses=[];
-let stackUI=null, processUI=null, prepareUI=null, backgroundUI=null;
+let stackUI=null, processUI=null, prepareUI=null, backgroundUI=null, stretchUI=null;
 const pickerValues = {};
 let blendSourceKey=null;
 const photoStages=new Map();
@@ -51,7 +51,7 @@ function inputState() {
   $('photoStage').disabled=busy || !doc;
   $('photoStage').selectedIndex=Math.max(0,stages.indexOf(photoStages.get(docID) || 'unknown'));
   $('inputHint').textContent=doc
-    ? '来源：'+doc.title+'。'+(isPreview(host.app.activeDocument?.id)?'当前查看加工预览，处理仍使用这张源照片。':'去星前请确认照片阶段；已有星点可在加工页手动选择。')
+    ? '来源：'+doc.title+'。'+(isPreview(host.app.activeDocument?.id)?'当前查看临时预览，来源仍为这张文档。':'去星前请确认照片阶段；已有星点可在加工页手动选择。')
     : '尚未打开照片。可先在 Photoshop 打开已显影照片，或从多张原片堆栈开始。';
   $('sceneHint').textContent=$('photoScene').selectedIndex===1
     ? '保留线性母版；去星前先在副本完成显影。已有星点和无星背景可直接手动带入加工。'
@@ -113,7 +113,7 @@ function workingDocument() {
   if(!doc) throw new Error('请打开源照片。');
   return host.documentInfo(doc);
 }
-function isPreview(id) { return id!=null && (id===processUI?.previewDocumentID() || id===backgroundUI?.previewDocumentID()); }
+function isPreview(id) { return id!=null && (id===processUI?.previewDocumentID() || id===backgroundUI?.previewDocumentID() || id===stretchUI?.previewDocumentID()); }
 function refresh(followActive=false) {
   const doc=workingDocument();
   const previous=doc.id===docID;
@@ -168,6 +168,7 @@ function updateActions() {
   if(processUI) processUI.updateActions(busy);
   if(prepareUI) prepareUI.updateActions(busy);
   if(backgroundUI) backgroundUI.updateActions(busy);
+  if(stretchUI) stretchUI.updateActions(busy);
 }
 function syncLayers() {
   if (busy || processUI?.isModalBusy()) return;
@@ -178,7 +179,7 @@ function syncLayers() {
     if (!next) {
       docID=null; layerList=[];
       for (const id of ['source','processSource','processBackground','backgroundSource']) choose(id,[],null);
-      $('documentName').textContent='未打开照片'; if(!['stack','prepare'].includes(currentPage)) status('请先打开一张照片。');
+      $('documentName').textContent='未打开照片'; if(!['stack','prepare','stretch'].includes(currentPage)) status('请先打开一张照片。');
       if(processUI) processUI.sync(next,old);
       if(backgroundUI) backgroundUI.sync(next,old);
       updateActions(); return;
@@ -187,7 +188,7 @@ function syncLayers() {
     refresh(changed || old.active!==next.active);
     if(processUI) processUI.sync(next,old);
     if(backgroundUI) backgroundUI.sync(next,old);
-    if (changed && !['stack','prepare'].includes(currentPage)) status('选择图层后即可处理。');
+    if (changed && !['stack','prepare','stretch'].includes(currentPage)) status('选择图层后即可处理。');
     updateActions();
   } catch(e) { status(e.message,true); updateActions(); }
 }
@@ -212,7 +213,7 @@ async function ensureService() {
 }
 function showPage(page) {
   currentPage=page;
-  for(const name of ['stack','prepare','background','separate','process']) {
+  for(const name of ['stack','prepare','stretch','background','separate','process']) {
     $(name+'Page').classList.toggle('active',name===page);
     $(name+'Tab').classList.toggle('selected',name===page);
     $(name+'Tab').setAttribute('aria-selected',String(name===page));
@@ -220,6 +221,7 @@ function showPage(page) {
   syncLayers();
   if(page==='stack') status('选择一批照片或文件夹；无需在 Photoshop 中打开素材。');
   if(page==='prepare') status('选择未拉伸的 Star Studio 32位线性TIFF母版，先检查范围，再创建独立副本。');
+  if(page==='stretch') status('选择T4准备副本，建议参数后仅预览；保存并应用是独立操作。');
   if(page==='process') status('选择星点图层和可选背景，自动在 Photoshop 中预览。');
   if(page==='background') status('选择已显影照片或无星背景，生成建议并检查主体保护。');
   processUI?.pageChanged();
@@ -378,7 +380,7 @@ $('photoStage').addEventListener('change',()=>{
 });
 $('photoScene').addEventListener('change',()=>{inputState();if(settingsFile) saveModelSettings();});
 $('executable').value=config.starnet || '';
-for (const page of ['stack','prepare','background','separate','process']) $(page+'Tab').addEventListener('click',()=>showPage(page));
+for (const page of ['stack','prepare','stretch','background','separate','process']) $(page+'Tab').addEventListener('click',()=>showPage(page));
 $('modelOptions').addEventListener('click',()=>$('modelSettings').classList.toggle('expanded'));
 for(const id of ['stride','decomposition','executable']) $(id).addEventListener('change',()=>{if(settingsFile) saveModelSettings();});
 $('preserveModelBackground').addEventListener('change',()=>{updateActions();if(settingsFile) saveModelSettings();});
@@ -403,7 +405,8 @@ $('acceptModelLicense').addEventListener('change',()=>{
   if(settingsFile) saveModelSettings();
 });
 $('extract').addEventListener('click',()=>run(extract));
-prepareUI=require('./linear-preparation.js').setup({run,api,job,status,isBusy:()=>busy,onOpened:doc=>{photoStages.set(doc.id,'linear');refresh();}});
+stretchUI=require('./protected-stretch.js').setup({run,api,job,status,report,isBusy:()=>busy,onSource:doc=>{photoStages.set(doc.id,'linear');refresh();documentSnapshot=snapshot();},onApplied:(doc,nonlinear)=>{photoStages.set(doc.id,nonlinear?'developed':'linear');refresh();documentSnapshot=snapshot();}});
+prepareUI=require('./linear-preparation.js').setup({run,api,job,status,isBusy:()=>busy,onPrepared:file=>stretchUI.setLastPrepared(file),onOpened:doc=>{photoStages.set(doc.id,'linear');refresh();}});
 backgroundUI=require('./background.js').setup({run,api,job,status,report,selectedLayer,useActive,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,stage:doc=>photoStages.get(doc.id) || 'unknown',onApplied:doc=>{photoStages.set(doc.id,'developed');refresh();documentSnapshot=snapshot();}});
 stackUI=require('./stack.js').setup({run,api,job,status,onSaved:(file,format)=>prepareUI.setLastMaster(file,format)});
 processUI=require('./star-processing.js').setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,starEncoding:(doc,layer)=>starRelation(doc,layer).encoding,refreshBlendModes:()=>refreshBlendModes(workingDocument()),ensureService,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,currentPage:()=>currentPage});

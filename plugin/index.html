@@ -11,7 +11,27 @@
   <div class="row"><label>拍摄场景</label><sp-picker id="photoScene"><sp-menu><sp-menu-item>银河 / 带地景</sp-menu-item><sp-menu-item>深空</sp-menu-item></sp-menu></sp-picker></div>
   <div id="sceneHint" class="muted"></div>
 </div>
-<div class="tabs" role="tablist"><button id="stackTab" class="tab selected" role="tab" aria-selected="true">堆栈</button><button id="prepareTab" class="tab" role="tab" aria-selected="false">母版准备</button><button id="backgroundTab" class="tab" role="tab" aria-selected="false">背景校正</button><button id="separateTab" class="tab" role="tab" aria-selected="false">星点分离</button><button id="processTab" class="tab" role="tab" aria-selected="false">星点加工</button></div>
+<div class="tabs" role="tablist"><button id="stackTab" class="tab selected" role="tab" aria-selected="true">堆栈</button><button id="prepareTab" class="tab" role="tab" aria-selected="false">母版准备</button><button id="stretchTab" class="tab" role="tab" aria-selected="false">线性提亮</button><button id="backgroundTab" class="tab" role="tab" aria-selected="false">背景校正</button><button id="separateTab" class="tab" role="tab" aria-selected="false">星点分离</button><button id="processTab" class="tab" role="tab" aria-selected="false">星点加工</button></div>
+<section id="stretchPage" class="page" role="tabpanel">
+  <div class="row"><button id="stretchChoose">选择准备副本…</button><button id="stretchUseLast">使用刚准备副本</button></div>
+  <div class="hint">仅接收“母版准备”原样生成的32位线性ProPhoto TIFF，读取磁盘文件；PS尚未保存的编辑不会带入。已显影照片可跳过此页。</div>
+  <div id="stretchSummary" class="hint"></div>
+  <label class="processCompare"><input id="stretchConfirmed" type="checkbox"> 我确认该准备副本仍未拉伸</label>
+  <button id="stretchLoad">读取并建议参数</button>
+  <div class="row"><label>提亮程度</label><input id="stretch_amount" type="number" min="0" max="10" step="0.1"></div>
+  <input id="stretch_amountRange" type="range" min="0" max="10" step="0.1">
+  <div class="row"><label>亮星保护</label><input id="stretch_protection" type="number" min="0" max="1" step="0.05"></div>
+  <input id="stretch_protectionRange" type="range" min="0" max="1" step="0.05">
+  <div class="row"><label>背景亮度</label><input id="stretch_background" type="number" min="0" max="1" step="0.05"></div>
+  <input id="stretch_backgroundRange" type="range" min="0" max="1" step="0.05">
+  <div class="hint">RGB联动modified asinh；参数从同一快照重算，不累加。提亮0为恒等。亮星保护调节高光切线，背景亮度控制中位峰值附近的对称点，不压黑点。</div>
+  <div class="row"><button id="stretchPreview" class="primary">仅查看提亮</button><button id="stretchReset">重置为原输入</button></div>
+  <label class="processCompare"><input id="stretchOriginal" type="checkbox"> 比较原线性输入</label>
+  <div id="stretchFeedback" class="hint"></div><div id="stretchState" class="hint"></div>
+  <div class="hint">预览在PS临时标签页全分辨率显示，原母版和准备副本不变。检查后再显式保存并应用；新增黑白端点时禁止应用。32位曲线仍有舍入，原母版不能删除。</div>
+  <div class="row"><button id="stretchExecute" class="primary execute">保存并应用拉伸…</button><button id="stretchCancel" disabled>取消</button></div>
+  <div id="stretchSaved" class="hint"></div>
+</section>
 <section id="backgroundPage" class="page" role="tabpanel">
   <label>照片或无星背景图层</label><div class="row"><sp-picker id="backgroundSource"><sp-menu></sp-menu></sp-picker><button id="backgroundUseActive">用当前图层</button></div>
   <div class="hint">先确认「照片阶段」为已显影。大尺度渐变校正不会降噪，不代替平场；满幅星云或没有可靠天空时请跳过。</div>

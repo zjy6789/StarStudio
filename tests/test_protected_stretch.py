@@ -223,6 +223,7 @@ def test_store_snapshots_render_output_and_save_contract(tmp_path):
     inspected = wait(store, dict(op='stretchInspect', path=str(path), confirmedLinear=True))
     assert inspected['state'] == 'done', inspected
     info = inspected['result'];source = info['image']
+    assert wait(store, dict(op='stretchCheck', image=source))['state'] == 'done'
     result = wait(store, dict(op='stretchRender', image=source, settings=dict(amount=4)))
     assert result['state'] == 'done', result
     key = result['result']['image']
@@ -235,6 +236,9 @@ def test_store_snapshots_render_output_and_save_contract(tmp_path):
     count = len(store.images)
     bad = wait(store, dict(op='stretchRender', image=source, settings=dict(amount=11)))
     assert bad['state'] == 'error' and len(store.images) == count
+    with path.open('ab') as f:
+        f.write(b'changed')
+    assert wait(store, dict(op='stretchCheck', image=source))['state'] == 'error'
     store.delete(source)
     assert wait(store, dict(op='stretchSave', image=key, output=str(target)))['state'] == 'error'
     store.delete(key)
