@@ -24,10 +24,12 @@
   <input id="stretch_protectionRange" type="range" min="0" max="1" step="0.05">
   <div class="row"><label>背景亮度</label><input id="stretch_background" type="number" min="0" max="1" step="0.05"></div>
   <input id="stretch_backgroundRange" type="range" min="0" max="1" step="0.05">
-  <div class="hint">RGB联动modified asinh；参数从同一快照重算，不累加。提亮0为恒等。亮星保护调节高光切线，背景亮度控制中位峰值附近的对称点，不压黑点。</div>
+  <div class="hint">各颜色通道联动提亮；0恢复原输入，所有调整从同一快照重算。亮星保护减轻高光压缩，背景亮度不会压黑点。</div>
   <div class="row"><button id="stretchPreview" class="primary">仅查看提亮</button><button id="stretchReset">重置为原输入</button></div>
   <label class="processCompare"><input id="stretchOriginal" type="checkbox"> 比较原线性输入</label>
   <div id="stretchFeedback" class="hint"></div><div id="stretchState" class="hint"></div>
+  <button id="stretchAdvancedOptions" class="disclosure">曲线与精度信息 ▾</button>
+  <div id="stretchAdvanced" class="collapsed"><div id="stretchMath" class="hint"></div><div id="stretchRounding" class="hint"></div></div>
   <div class="hint">预览在PS临时标签页全分辨率显示，原母版和准备副本不变。检查后再显式保存并应用；新增黑白端点时禁止应用。32位曲线仍有舍入，原母版不能删除。</div>
   <div class="row"><button id="stretchExecute" class="primary execute">保存并应用拉伸…</button><button id="stretchCancel" disabled>取消</button></div>
   <div id="stretchSaved" class="hint"></div>

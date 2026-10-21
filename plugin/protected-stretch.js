@@ -41,6 +41,7 @@ function setup({run,api,job,status,report,isBusy,onSource=()=>{},onApplied=()=>{
   }
   function choose(file) {
     selected=file;$('stretchConfirmed').checked=false;
+    for(const id of ['stretchFeedback','stretchMath','stretchRounding'])$(id).textContent='';
     $('stretchSummary').textContent=file?file.name+' · 确认仍未拉伸后，读取并建议参数。':'选择母版准备生成的原样TIFF副本。';
     $('stretchState').textContent='尚未应用拉伸；原文件始终保留。';
   }
@@ -81,7 +82,8 @@ function setup({run,api,job,status,report,isBusy,onSource=()=>{},onApplied=()=>{
   async function load() {
     if(!selected || !$('stretchConfirmed').checked)throw new Error('请选择T4副本，并确认它仍未拉伸。');
     await clear();
-    $('stretchFeedback').textContent='';$('stretchState').textContent='正在读取线性副本；尚未应用。';
+    for(const id of ['stretchFeedback','stretchMath','stretchRounding'])$(id).textContent='';
+    $('stretchState').textContent='正在读取线性副本；尚未应用。';
     try {
       info=await task({op:'stretchInspect',path:selected.nativePath,confirmedLinear:true});
       setSettings(info.suggestion);
@@ -98,7 +100,9 @@ function setup({run,api,job,status,report,isBusy,onSource=()=>{},onApplied=()=>{
     if(key!==currentKey()){await remove(next.image);throw new Error('参数已变化；请重新预览当前设置。');}
     const previous=result;result=next;resultKey=key;await remove(previous?.image);
     const p=next.curve,s=next.stats;
-    $('stretchFeedback').textContent='SP '+p.sp.toPrecision(5)+' · HP '+p.hp.toPrecision(5)+'\n新增黑端点 '+s.newBlackChannels+' / 白端点 '+s.newWhiteChannels+' 个通道；近饱和 '+s.nearWhitePixels+' 像素\n32位存储最大舍入误差 '+s.maxStorageError.toExponential(3)+'。未新增端点不等于无损。';
+    $('stretchFeedback').textContent='新增黑端点 '+s.newBlackChannels+' / 白端点 '+s.newWhiteChannels+' 个通道；近饱和 '+s.nearWhitePixels+' 像素。'+(s.newBlackChannels || s.newWhiteChannels?'暂不能应用，请降低提亮或增加亮星保护。':'');
+    $('stretchMath').textContent='RGB峰值联动modified asinh · SP '+p.sp.toPrecision(5)+' · HP '+p.hp.toPrecision(5)+'；LP/BP固定0。';
+    $('stretchRounding').textContent='32位存储最大舍入误差 '+s.maxStorageError.toExponential(3)+'；未新增端点不等于无损。';
     return result;
   }
   async function show() {
@@ -147,7 +151,7 @@ function setup({run,api,job,status,report,isBusy,onSource=()=>{},onApplied=()=>{
     $('stretchLoad').disabled=busy || !selected || !$('stretchConfirmed').checked;
     $('stretchConfirmed').disabled=busy || !selected;
     for(const name of names)for(const suffix of ['', 'Range'])$('stretch_'+name+suffix).disabled=busy || !info;
-    for(const id of ['stretchPreview','stretchOriginal','stretchReset'])$(id).disabled=busy || !info;
+    for(const id of ['stretchPreview','stretchOriginal','stretchReset','stretchAdvancedOptions'])$(id).disabled=busy || !info;
     $('stretchExecute').disabled=busy || !result || resultKey!==currentKey() || shownKey!==resultKey || !!(result.stats.newBlackChannels || result.stats.newWhiteChannels);
     $('stretchCancel').disabled=!jobID;
   }
@@ -165,6 +169,7 @@ function setup({run,api,job,status,report,isBusy,onSource=()=>{},onApplied=()=>{
     $('stretch_'+name+'Range').addEventListener('change',dirty);
   }
   $('stretchCancel').addEventListener('click',()=>{if(jobID)api('/jobs/'+jobID,undefined,false,'DELETE').catch(e=>status(e.message,true));});
+  $('stretchAdvancedOptions').addEventListener('click',()=>$('stretchAdvanced').classList.toggle('expanded'));
   setSettings({amount:0,protection:.75,background:.8});choose(null);updateActions();
   return {updateActions,previewDocumentID:()=>preview?.docID,setLastPrepared:file=>{lastPrepared=file;updateActions();}};
 }
