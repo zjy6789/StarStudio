@@ -6,7 +6,7 @@ let docID = null, layerList = [], busy = false, updatingPickers=false;
 let currentPage='stack', serviceReady=false, documentSnapshot=null, panelVisible=true;
 let settingsFile=null, settingsWrite=Promise.resolve();
 let modelInfo=null, acceptedLicenses=[];
-let stackUI=null, processUI=null, prepareUI=null, backgroundUI=null, stretchUI=null;
+let stackUI=null, processUI=null, prepareUI=null, backgroundUI=null, stretchUI=null, maskUI=null;
 const pickerValues = {};
 let blendSourceKey=null;
 const photoStages=new Map();
@@ -169,6 +169,7 @@ function updateActions() {
   if(prepareUI) prepareUI.updateActions(busy);
   if(backgroundUI) backgroundUI.updateActions(busy);
   if(stretchUI) stretchUI.updateActions(busy);
+  if(maskUI) maskUI.updateActions(busy);
 }
 function syncLayers() {
   if (busy || processUI?.isModalBusy()) return;
@@ -182,12 +183,14 @@ function syncLayers() {
       $('documentName').textContent='未打开照片'; if(!['stack','prepare','stretch'].includes(currentPage)) status('请先打开一张照片。');
       if(processUI) processUI.sync(next,old);
       if(backgroundUI) backgroundUI.sync(next,old);
+      if(maskUI) maskUI.sync(next,old);
       updateActions(); return;
     }
     const changed=!old || old.id!==next.id;
     refresh(changed || old.active!==next.active);
     if(processUI) processUI.sync(next,old);
     if(backgroundUI) backgroundUI.sync(next,old);
+    if(maskUI) maskUI.sync(next,old);
     if (changed && !['stack','prepare','stretch'].includes(currentPage)) status('选择图层后即可处理。');
     updateActions();
   } catch(e) { status(e.message,true); updateActions(); }
@@ -414,6 +417,7 @@ prepareUI=require('./linear-preparation.js').setup({run,api,job,status,isBusy:()
 backgroundUI=require('./background.js').setup({run,api,job,status,report,selectedLayer,useActive,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,stage:doc=>photoStages.get(doc.id) || 'unknown',onApplied:doc=>{photoStages.set(doc.id,'developed');refresh();documentSnapshot=snapshot();}});
 stackUI=require('./stack.js').setup({run,api,job,status,onSaved:(file,format)=>prepareUI.setLastMaster(file,format),onLayeredOpened:doc=>{photoStages.set(doc.id,'linear');refresh();documentSnapshot=snapshot();}});
 processUI=require('./star-processing.js').setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,starEncoding:(doc,layer)=>starRelation(doc,layer).encoding,refreshBlendModes:()=>refreshBlendModes(workingDocument()),ensureService,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,currentPage:()=>currentPage});
+maskUI=require('./protection-masks.js').setup({run,api,job,status,report,selectedLayer,workingDocument,starRelation,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers});
 syncLayers();
 setInterval(syncLayers,800);
 document.addEventListener('uxpcommand',event=>{

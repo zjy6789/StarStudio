@@ -102,6 +102,22 @@
   <label class="processCompare"><input id="processOriginal" type="checkbox"> <span id="processCompareLabel">查看原星点</span></label>
   <div id="processPreviewHint" class="muted">可随时切换背景、星点和混合模式。大半径辉光或星形修复计算时保留上一帧预览。</div>
   <button id="processExecute" class="primary execute">执行星点加工</button>
+  <button id="maskOptions" class="disclosure">保护蒙版 ▾</button>
+  <div id="maskSettings" class="collapsed">
+    <label>覆盖来源</label><sp-picker id="maskMode"><sp-menu><sp-menu-item>星点覆盖</sp-menu-item><sp-menu-item>星点外区域</sp-menu-item><sp-menu-item>主体选区</sp-menu-item></sp-menu></sp-picker>
+    <div id="maskSourceHint" class="hint"></div>
+    <button id="maskReadSelection">读取主体选区</button>
+    <div class="row"><label>星点起点<input id="maskLow" type="number" min="0" max="1" step="0.0001" value="0.002"></label><label>完全覆盖<input id="maskHigh" type="number" min="0.0001" max="1" step="0.001" value="0.02"></label></div>
+    <div class="row"><label>扩展（像素）<input id="maskGrow" type="number" min="0" max="64" step="1" value="2"></label><label>外柔化（像素）<input id="maskFeather" type="number" min="0" max="64" step="0.5" value="1"></label></div>
+    <div class="row"><button id="maskGenerate">生成覆盖预览</button><button id="maskCancel">取消计算</button></div>
+    <img id="maskPreview" class="coveragePreview" alt="保护蒙版覆盖预览，白色为目标区域">
+    <div id="maskSummary" class="hint">先生成覆盖预览，再确认应用范围。</div>
+    <label><input id="maskInvert" type="checkbox" checked> 保护白区（反选）</label>
+    <div id="maskApplyHint" class="hint"></div>
+    <label><input id="maskReviewed" type="checkbox"> 已检查当前覆盖范围</label>
+    <div class="row"><button id="maskApply">应用到源照片选区</button><button id="maskSave">保存32位灰度蒙版…</button></div>
+    <div class="muted">仅更新选区，不修改照片像素。导出的白区与覆盖预览相同，反选只影响应用；可用 PS 快速蒙版继续编辑。</div>
+  </div>
 </section>
 <section id="stackPage" class="page active" role="tabpanel">
   <div class="row"><button id="stackFiles">选择照片…</button><button id="stackFolder">选择文件夹…</button></div>

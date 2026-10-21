@@ -3,6 +3,32 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const test=require('node:test');
 
+test('full-size float selection writes tiles to the source document in one history step',async()=>{
+  const width=1048577,doc={id:31,width,height:2},events=[];
+  const imaging={createImageDataFromBuffer:async(data,options)=>{
+    assert.equal(options.components,1);assert.equal(options.colorSpace,'Grayscale');assert.equal(options.width,width);assert.equal(options.height,1);
+    assert.equal('colorProfile' in options,false);assert.equal(data[0],.75);assert.equal(data.at(-1),.5);
+    return {dispose(){events.push('dispose');}};
+  },putSelection:async options=>events.push({id:options.documentID,replace:options.replace,top:options.targetBounds.top})};
+  const context={module:{exports:{}},Float32Array,require:()=>({imaging,core:{executeAsModal:async action=>action({hostControl:{
+    suspendHistory:async()=>{events.push('suspend');return 1;},resumeHistory:async(...args)=>events.push(args)}})}})};
+  vm.runInNewContext(fs.readFileSync('plugin/host.js','utf8'),context);
+  const api=async(path,body,binary)=>{assert.equal(binary,true);const values=new Float32Array(width).fill(.25);values[width-1]=.5;return values.buffer;};
+  await context.module.exports.applySelection(doc,'mask',{width,height:2},true,api,()=>{});
+  assert.deepEqual(JSON.parse(JSON.stringify(events)),['suspend',{id:31,replace:true,top:0},'dispose',{id:31,replace:false,top:1},'dispose',[1]]);
+});
+
+test('failed selection write disposes data and rolls history back; wrong canvas never writes',async()=>{
+  let disposed=0,resume,started=0;
+  const context={module:{exports:{}},Float32Array,require:()=>({imaging:{createImageDataFromBuffer:async()=>({dispose(){disposed++;}}),putSelection:async()=>{throw new Error('native rejected');}},
+    core:{executeAsModal:async action=>{started++;return action({hostControl:{suspendHistory:async()=>7,resumeHistory:async(...args)=>{resume=args;}}});}}})};
+  vm.runInNewContext(fs.readFileSync('plugin/host.js','utf8'),context);
+  const apply=context.module.exports.applySelection,api=async()=>new Float32Array([.25]).buffer;
+  await assert.rejects(apply({id:1,width:1,height:1},'mask',{width:1,height:1},false,api,()=>{}),/native rejected/);
+  assert.equal(disposed,1);assert.deepEqual(resume,[7,false]);
+  await assert.rejects(apply({width:2,height:1},'mask',{width:1,height:1},false,api,()=>{}),/尺寸/);assert.equal(started,1);
+});
+
 test('a failed float input read deletes its incomplete upload',async()=>{
   const deleted=[],constants={BitsPerChannelType:{EIGHT:8,SIXTEEN:16},DocumentMode:{RGB:'RGB'}};
   const context={module:{exports:{}},require:()=>({constants,imaging:{getPixels:async()=>{throw new Error('read failed');}}}),Float32Array};

@@ -63,6 +63,7 @@ function panel(options={}) {
       if(name==='./background.js')return {setup:options=>{h.backgroundOptions=options;return {updateActions(){},sync(){},previewDocumentID:()=>h.backgroundPreviewID};}};
       if(name==='./protected-stretch.js')return {setup:options=>{h.stretchOptions=options;return {updateActions(){},previewDocumentID:()=>h.stretchPreviewID,setLastPrepared:file=>{h.lastPrepared=file;}};}};
       if(name==='./star-processing.js')return {setup:options=>{processSetups++;h.processOptions=options;return processUI;}};
+      if(name==='./protection-masks.js')return {setup:options=>{h.maskOptions=options;return {updateActions(){},sync(){}};}};
       throw new Error('Unexpected require '+name);
     }
   };

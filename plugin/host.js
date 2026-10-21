@@ -254,6 +254,24 @@ async function uploadSelection(doc, api, report) {
   } catch(error) {await api('/images/'+id,undefined,false,'DELETE');throw error;}
 }
 
+async function applySelection(doc, key, meta, invert, api, report) {
+  if(doc.width!==meta.width || doc.height!==meta.height) throw new Error('画布尺寸已变化，请重新生成蒙版。');
+  return transaction(doc,'应用保护选区',async context=>{
+    const block=Math.max(1,Math.floor(8*1024*1024/(meta.width*4)));
+    for(let y=0;y<meta.height;y+=block) {
+      if(context.isCancelled) throw new Error('用户取消了操作。');
+      const rows=Math.min(block,meta.height-y);
+      const data=new Float32Array(await api('/images/'+key+'?y='+y+'&rows='+rows,undefined,true));
+      if(data.length!==meta.width*rows) throw new Error('蒙版数据尺寸不符。');
+      if(invert) for(let i=0;i<data.length;i++) data[i]=1-data[i];
+      const imageData=await imaging.createImageDataFromBuffer(data,{width:meta.width,height:rows,components:1,colorSpace:'Grayscale',fullRange:true});
+      try {await imaging.putSelection({documentID:doc.id,imageData,replace:y===0,targetBounds:{left:0,top:y}});}
+      finally {imageData.dispose();}
+      report((y+rows)/meta.height);
+    }
+  });
+}
+
 async function uploadBackground(doc,layer,api,report) {
   if(doc.bitsPerChannel===constants.BitsPerChannelType.THIRTYTWO) return upload(doc,layer,api,report);
   // PS 27.1 can fail when getPixels directly requests 32-bit from an integer
@@ -427,4 +445,4 @@ async function applyStarResult({doc,source,background,blend,result,meta,previous
   });
 }
 
-module.exports = {app, core, imaging, constants, layers, findLayer, archiveLayer, documentInfo, upload, write, starBlendModes, starEncoding, setStarBlendMode, canvasStarPreview, transaction, applyStarResult, uploadSelection, uploadBackground, canvasBackgroundPreview, applyBackgroundResult, canvasFloatPreview:canvasBackgroundPreview, applyFloatResult:applyBackgroundResult, openStackLayers};
+module.exports = {app, core, imaging, constants, layers, findLayer, archiveLayer, documentInfo, upload, write, starBlendModes, starEncoding, setStarBlendMode, canvasStarPreview, transaction, applyStarResult, uploadSelection, applySelection, uploadBackground, canvasBackgroundPreview, applyBackgroundResult, canvasFloatPreview:canvasBackgroundPreview, applyFloatResult:applyBackgroundResult, openStackLayers};

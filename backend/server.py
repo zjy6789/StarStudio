@@ -32,17 +32,20 @@ class Store:
         self.processing_cache = {}
         self.background_models = {}
         self.stretch_sources, self.stretch_results = {}, {}
+        self.protection_masks = {}
 
-    def create(self, w, h, c):
+    def create(self, w, h, c, purpose="image"):
         if not (0 < w <= 65536 and 0 < h <= 65536 and w*h <= 250_000_000 and c in (1, 2, 3, 4)):
             raise ValueError("无效图像尺寸")
         key = uuid.uuid4().hex
         a = np.lib.format.open_memmap(self.path / f"{key}.npy", mode="w+", dtype="<f4", shape=(h, w, c))
-        self.images[key] = {"data": a, "rows": 0, "ready": False}
+        self.images[key] = {"data": a, "rows": 0, "ready": False, "purpose": purpose}
         return key
 
-    def get(self, key):
+    def get(self, key, purpose="image"):
         entry = self.images[key]
+        if entry["purpose"] != purpose:
+            raise ValueError("蒙版专用来源不能用于普通图像作业")
         if not entry["ready"]:
             raise ValueError("图像上传尚未完成")
         return entry["data"]
@@ -67,6 +70,7 @@ class Store:
         return key
 
     def delete(self, key):
+        self.protection_masks.pop(key, None)
         self.background_models.pop(key, None)
         self.stretch_sources.pop(key, None)
         self.stretch_results.pop(key, None)
@@ -184,6 +188,26 @@ class Store:
                             except Exception:
                                 self.delete(output_id)
                                 raise
+                    elif operation in ("maskGenerate", "maskSave"):
+                        from .protection_masks import make_mask, save_mask
+                        canceled = lambda: job.get("cancel", False)
+                        if operation == "maskGenerate":
+                            job["message"] = "生成完整尺寸保护蒙版…"
+                            options = request["options"]
+                            purpose = "image" if options.get("mode") == "subject" else "mask-source"
+                            image, details = make_mask(self.get(request["image"], purpose), options, progress, canceled)
+                            output_id = self.save(image)
+                            if canceled():
+                                self.delete(output_id)
+                                raise InterruptedError("蒙版生成已取消")
+                            self.protection_masks[output_id] = details
+                            job["result"] = dict(details, image=output_id)
+                        else:
+                            job["message"] = "保存32位灰度蒙版副本…"
+                            image_id = request["image"]
+                            if image_id not in self.protection_masks:
+                                raise ValueError("蒙版结果已失效，请重新生成")
+                            job["result"] = save_mask(self.get(image_id), self.protection_masks[image_id], request["output"], canceled)
                     elif operation == "processStars":
                         from .star_processing import process_stars, curve_values
                         if job.get("cancel"):
@@ -256,7 +280,7 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                if operation in ("stackCrop", "processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchCheck", "stretchRender", "stretchSave") and job.get("cancel"):
+                if operation in ("maskGenerate", "maskSave", "stackCrop", "processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchCheck", "stretchRender", "stretchSave") and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
                     if operation == "stack" and getattr(e,"failed_file",None):
@@ -313,11 +337,15 @@ class Handler(BaseHTTPRequestHandler):
             if length < 0 or length > 64*1024*1024:
                 raise ValueError("请求过大，请分块上传")
             body = self.rfile.read(length) if self.command == "POST" else b""
-            if self.command == "POST" and parts == ["images"]:
+            if self.command == "POST" and parts in (["images"], ["mask-sources"]):
                 r = json.loads(body)
-                self.reply({"id": store.create(int(r["width"]), int(r["height"]), int(r["components"]))})
-            elif len(parts) == 2 and parts[0] == "images":
+                self.reply({"id": store.create(int(r["width"]), int(r["height"]), int(r["components"]),
+                                              "mask-source" if parts[0] == "mask-sources" else "image")})
+            elif len(parts) == 2 and parts[0] in ("images", "mask-sources"):
                 key = parts[1]
+                purpose = "mask-source" if parts[0] == "mask-sources" else "image"
+                if store.images[key]["purpose"] != purpose:
+                    raise ValueError("图像来源类型与入口不符")
                 if self.command == "POST":
                     entry = store.images[key]
                     a = entry["data"]
@@ -327,7 +355,11 @@ class Handler(BaseHTTPRequestHandler):
                     if len(body) != rows*a.shape[1]*a.shape[2]*4:
                         raise ValueError("图像块字节数不符")
                     block = np.frombuffer(body, dtype="<f4").reshape(rows, a.shape[1], a.shape[2])
-                    validate_image(block)
+                    if purpose == "mask-source":
+                        from .protection_masks import validate_source
+                        validate_source(block)
+                    else:
+                        validate_image(block)
                     a[y:y+rows] = block
                     entry["rows"] += rows
                     entry["ready"] = entry["rows"] == a.shape[0]
@@ -335,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
                         a.flush()
                     self.reply({"ready": entry["ready"]})
                 elif self.command == "GET":
-                    a = store.get(key)
+                    a = store.get(key, purpose)
                     y, rows = int(q.get("y", 0)), int(q.get("rows", 128))
                     if y < 0 or rows <= 0 or y+rows > a.shape[0] or rows*a.shape[1]*a.shape[2]*4 > 64*1024*1024:
                         raise ValueError("无效图像块范围")
