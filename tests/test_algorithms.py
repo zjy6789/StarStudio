@@ -1,6 +1,27 @@
 import numpy as np
 import pytest
 from backend.algorithms import separate, combine, stretch, stretch_curve, validate_image
+from scipy.integrate import quad
+
+
+@pytest.mark.parametrize('amount', [1, 5, 10])
+@pytest.mark.parametrize('lp,sp,hp', [(0., 0., 1.), (0., .002, .3), (.001, .02, .6)])
+def test_asinh_matches_independent_integrated_derivative(amount, lp, sp, hp):
+    d = np.expm1(amount)
+    def derivative(t):
+        t = min(max(t, lp), hp)
+        return d/np.hypot(1, d*(t-sp))
+    edges = sorted({0., lp, sp, hp, 1.})
+    def integral(stop):
+        intervals = sorted({0., *[v for v in edges if 0 < v < stop], stop})
+        return sum(quad(derivative, a, b, epsabs=1e-100, epsrel=1e-11)[0] for a, b in zip(intervals, intervals[1:]))
+    denominator = integral(1.)
+    x = np.array([0., 1e-45, 1e-20, 1e-8, .001, .01, .1, .4, .9, 1.])
+    result = stretch_curve(x, dict(type='asinh', lnD=amount, lp=lp, sp=sp, hp=hp), dtype=np.float64, clip=False)
+    expected = np.array([integral(v)/denominator for v in x])
+    np.testing.assert_allclose(result, expected, rtol=1e-10, atol=1e-15)
+    np.testing.assert_allclose(result[1:4], expected[1:4], rtol=1e-10, atol=0)
+    assert result[0] == 0 and result[-1] == 1 and np.all(np.diff(result) > 0)
 from backend.server import Store, sequence
 
 

@@ -167,7 +167,15 @@ def separate(original, background, mode="screen", preserve_model=False, star_enc
     return bg.astype(np.float32), stars.astype(np.float32)
 
 
-def stretch_curve(x, p):
+def _asinh_interval(start, delta):
+    """asinh(start+delta)-asinh(start), stable for tiny positive deltas."""
+    end = start+delta
+    denominator = end*np.hypot(1, start)+start*np.hypot(1, end)
+    ratio = np.divide(end+start, denominator, out=np.ones_like(end), where=denominator != 0)
+    return np.where(start*end >= 0, np.arcsinh(delta*ratio), np.arcsinh(end)-np.arcsinh(start))
+
+
+def stretch_curve(x, p, *, dtype=np.float32, clip=True):
     """Siril GHS/modified arcsinh, normalized protected tangent segments.
 
     lnD is the user-facing ln(D+1). BP shift is AFTER stretching, as in Siril
@@ -211,13 +219,22 @@ def stretch_curve(x, p):
                 return D*(1+D*b*u)**(-(b+1)/b)
             return D*(1+D*(-b)*u)**(1/b)
 
-        fl, fh = primitive(lp-sp), primitive(hp-sp)
         sl, sh = slope(sp-lp), slope(hp-sp)
-        f0, f1 = fl-lp*sl, fh+(1-hp)*sh
-        f = primitive(np.clip(x, lp, hp)-sp)
-        f = np.where(x < lp, fl+(x-lp)*sl, np.where(x > hp, fh+(x-hp)*sh, f))
-        out = (f-f0)/(f1-f0)
-    return np.clip((out-bp)/(1-bp), 0, 1).astype(np.float32)
+        if kind == "asinh":
+            # Integrate from zero using nonnegative intervals. Subtracting two
+            # almost equal primitives used to erase very faint positive input.
+            span = _asinh_interval(D*(lp-sp), np.asarray(D*(hp-lp)))
+            f = lp*sl+_asinh_interval(D*(lp-sp), D*(np.clip(x, lp, hp)-lp))
+            f = np.where(x < lp, x*sl, np.where(x > hp, lp*sl+span+(x-hp)*sh, f))
+            out = f/(lp*sl+span+(1-hp)*sh)
+        else:
+            fl, fh = primitive(lp-sp), primitive(hp-sp)
+            f0, f1 = fl-lp*sl, fh+(1-hp)*sh
+            f = primitive(np.clip(x, lp, hp)-sp)
+            f = np.where(x < lp, fl+(x-lp)*sl, np.where(x > hp, fh+(x-hp)*sh, f))
+            out = (f-f0)/(f1-f0)
+    out = (out-bp)/(1-bp)
+    return (np.clip(out, 0, 1) if clip else out).astype(dtype)
 
 
 def stretch(image, p):
