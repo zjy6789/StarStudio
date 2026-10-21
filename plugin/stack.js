@@ -5,7 +5,7 @@ const extensions=['arw','cr2','cr3','nef','nrw','raf','orf','rw2','pef','srw','d
 
 function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
   let selection=null, strokes=[], drawing=null, activeJob=null, quality=null;
-  let originalPaths=[],failedFile=null;
+  let originalPaths=[],failedFile=null,reportResult=null;
   const calibration={dark:[],flat:[],bias:[],darkflat:[]};
   const modes=['mean','median','sigma','maximum','minimum'], formats=['dng','tiff16','tiff32','fits16','fits32'];
   for(const id of ['stackMode','stackScene']) $(id).selectedIndex=0;
@@ -14,6 +14,10 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
     $('stackExecute').disabled=busy || !selection;
     $('stackCancel').disabled=!activeJob;
     $('stackCoverageSave').disabled=busy || !quality;
+    const cropReady=quality?.crop && quality.sourceSHA256 && reportResult?.recordSHA256;
+    $('stackCoverageView').disabled=busy || !reportResult?.compositionPreview;
+    $('stackCropConfirmed').disabled=busy || !cropReady;
+    $('stackCropSave').disabled=busy || !cropReady || !$('stackCropConfirmed').checked;
     $('stackExcludeFailed').disabled=busy || !failedFile || !selection || selection.paths.length<3;
     $('stackRestoreFrames').disabled=busy || !selection || originalPaths.length===selection.paths.length;
     $('stackReferenceChoice').disabled=busy || !selection;
@@ -29,25 +33,49 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
   }
   function clearFailure() {failedFile=null;$('stackFailedHint').textContent='';}
   function clearQuality() {
-    quality=null;
+    quality=null;reportResult=null;
+    $('stackCropConfirmed').checked=false;$('stackCropHint').textContent='';$('stackCropSaved').textContent='';
     $('stackQualitySummary').textContent='堆栈完成后查看逐帧配准与覆盖情况；不会自动丢帧或裁剪。';
     $('stackQualityRows').textContent='';$('stackCoverageHint').textContent='';
     $('stackCoveragePreview').removeAttribute('src');updateActions(true);
   }
   function showQuality(result) {
+    reportResult=result;
     quality=result.quality || null;
     $('stackQualitySummary').textContent='基准：'+result.reference+'；基准帧RMS=0只表示自身对齐，不代表最佳质量。';
     $('stackQualityRows').textContent=records(result.alignment);
     if(!quality) {
       $('stackCoverageHint').textContent='当前组件没有返回完整覆盖报告；已保存的堆栈不受影响，请更新后台组件。';return;
     }
-    $('stackCoveragePreview').src=quality.preview;
+    $('stackCoverageView').selectedIndex=result.compositionPreview?1:0;
+    $('stackCoveragePreview').src=result.compositionPreview || quality.preview;
     const crop=quality.crop;
     $('stackCoverageHint').textContent='几何覆盖 '+quality.minimum+'–'+quality.maximum+' / '+quality.frames+' 帧；全部帧共同覆盖 '+
-      (100*quality.fullPixels/quality.totalPixels).toFixed(1)+'%。亮度表示覆盖比例，青框为共同覆盖裁剪建议。'+
+      (100*quality.fullPixels/quality.totalPixels).toFixed(1)+'%。覆盖图亮度表示覆盖比例，青框为共同覆盖裁剪建议。'+
       (crop?'范围 ['+crop.left+', '+crop.top+') 至 ['+crop.right+', '+crop.bottom+')，'+(crop.right-crop.left)+' × '+(crop.bottom-crop.top)+' 像素；尚未裁剪。':'没有全部帧共同覆盖的矩形，不建议自动裁剪。')+
       ' 此计数在Sigma剔除之前累计，不是信噪比或剔除后的样本数。母版保持完整尺寸。';
+    $('stackCropHint').textContent=!crop?'没有全部帧共同覆盖的矩形，不能保存建议裁剪副本。':quality.sourceSHA256 && result.recordSHA256
+      ? '检查构图后可另存同格式裁剪副本；逐像素复制，原母版保留。16位母版已有的量化不会恢复。'
+      : '此报告缺少母版来源校验，不能直接裁剪；请更新组件后重新堆栈。';
   }
+  $('stackCoverageView').addEventListener('change',()=>{
+    if(quality)$('stackCoveragePreview').src=$('stackCoverageView').selectedIndex===1?reportResult.compositionPreview || quality.preview:quality.preview;
+  });
+  $('stackCropConfirmed').addEventListener('change',()=>updateActions());
+  $('stackCropSave').addEventListener('click',()=>run(async()=>{
+    if(!quality?.crop || !quality.sourceSHA256 || !reportResult?.recordSHA256)throw new Error('请先生成带来源校验的覆盖报告。');
+    if(!$('stackCropConfirmed').checked)throw new Error('请先查看并确认裁剪范围。');
+    const extension=reportResult.output.split('.').pop().toLowerCase();
+    const file=await fs.getFileForSaving('StarStudio_stack_crop.'+extension,{types:[extension]});if(!file)return;
+    let result;
+    try {
+      result=await job({op:'stackCrop',source:reportResult.output,output:file.nativePath,confirmed:true,crop:quality.crop,
+        sourceSHA256:quality.sourceSHA256,recordSHA256:reportResult.recordSHA256},id=>{activeJob=id;updateActions(true);});
+    } finally {activeJob=null;updateActions(true);}
+    onSaved(file,result.format);$('stackCropConfirmed').checked=false;
+    $('stackCropSaved').textContent='已保存 '+result.shape[1]+' × '+result.shape[0]+' 裁剪副本：'+file.nativePath+'。完整母版和原报告保留。';
+    status($('stackCropSaved').textContent);
+  }));
   $('stackQualityOptions').addEventListener('click',()=>{
     $('stackQualitySettings').classList.toggle('expanded');
     $('stackQualityOptions').textContent='配准与覆盖报告 '+($('stackQualitySettings').classList.contains('expanded')?'▴':'▾');
@@ -201,7 +229,7 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
   document.addEventListener('mouseup',()=>{drawing=null;});
   $('stackMask').addEventListener('mouseleave',()=>{drawing=null;});
   $('stackCancel').addEventListener('click',()=>{
-    if(activeJob) api('/jobs/'+activeJob,undefined,false,'DELETE').then(()=>status('正在取消，完成当前解码后停止…')).catch(e=>status(e.message,true));
+    if(activeJob) api('/jobs/'+activeJob,undefined,false,'DELETE').then(()=>status('正在取消，完成当前读写后停止…')).catch(e=>status(e.message,true));
   });
   $('stackExecute').addEventListener('click',()=>run(async()=>{
     if(!selection) throw new Error('请先选择照片。');

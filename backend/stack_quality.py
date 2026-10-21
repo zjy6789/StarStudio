@@ -1,9 +1,32 @@
 """Read-only geometric coverage diagnostics; never edit or crop stack pixels."""
 import base64
+import hashlib
 import io
 
 import numpy as np
 from PIL import Image, ImageDraw
+from .stack_io import preview_png
+
+
+def file_sha256(path, check=lambda: None):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as source:
+        while block := source.read(1024*1024):
+            check()
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def composition_preview(image, meta, crop):
+    data = preview_png(image, meta, max_size=960)
+    with Image.open(io.BytesIO(base64.b64decode(data.split(',', 1)[1]))) as source:
+        preview = source.convert('RGB')
+    if crop:
+        sx, sy = preview.width/image.shape[1], preview.height/image.shape[0]
+        ImageDraw.Draw(preview).rectangle((crop['left']*sx, crop['top']*sy,
+                                          (crop['right']-1)*sx, (crop['bottom']-1)*sy),
+                                         outline=(0, 220, 220), width=2)
+    return _png(preview)
 
 
 def _png(image):

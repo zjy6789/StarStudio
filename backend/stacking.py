@@ -16,7 +16,7 @@ from scipy.spatial import cKDTree
 from .stack_io import ordered_paths, read_frame, preview_png, write_result, RAW_EXTENSIONS
 from .calibration import Calibration, selected_paths
 from .stack_layers import layer_targets, save_layers
-from .stack_quality import coverage_report
+from .stack_quality import coverage_report, composition_preview, file_sha256
 
 MODES = {'mean', 'median', 'sigma', 'maximum', 'minimum'}
 cv2.setNumThreads(min(8, cv2.getNumberOfCPUs()))
@@ -315,6 +315,7 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
                 if quality:
                     message('生成几何覆盖与配准报告…')
                     summary['quality'] = coverage_report(count,len(files),check)
+                    composition = composition_preview(result,meta,summary['quality']['crop'])
                 if layered:
                     summary = save_layers(layer_files,result,reference_map,meta,format,summary,started,check)
                 else:
@@ -324,8 +325,13 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
                         # astronomical file and open a full float32 temporary TIFF.
                         check()
                         write_result(photoshop_output,result,meta,'tiff32')
+                    if quality:
+                        summary['quality']['sourceSHA256'] = file_sha256(output,check)
                     summary.update(encoding=encoding,photoshopOutput=str(photoshop_output),seconds=round(time.monotonic()-started,2))
                     output.with_suffix(output.suffix+'.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
+                if quality:
+                    summary['recordSHA256'] = file_sha256(output.with_suffix(output.suffix+'.json'))
+                    summary['compositionPreview'] = composition
                 progress(1)
                 return summary
             finally:

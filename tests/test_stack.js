@@ -50,6 +50,7 @@ function panel() {
       started('stack-job');
       if(h.gate)await h.gate;
       if(h.failure)throw h.failure;
+      if(request.op==='stackCrop')return {output:request.output,format:h.result.format,shape:[6,8,3]};
       return {frames:3,seconds:1.2,encoding:{scale:1},calibration:{warnings:[]},...h.result,
         ...(request.referenceGround && !h.missingLayers?{layers:{depth:32,referenceResampled:false}}:{})};
     }
@@ -306,4 +307,51 @@ test('excluding a failed reference uses the remaining middle frame and will not 
   await assert.rejects(h.execute(),/bad first/);assert.deepEqual(h.calls.jobs.at(-1).mask,[]);
   assert.equal(h.get('stackExcludeFailed').disabled,true);
   await assert.rejects(h.emit('stackExcludeFailed'),/至少需要保留两张/);
+});
+
+function croppable(h) {
+  reported(h);Object.assign(h.result,{output:file('master.dng').nativePath,format:'dng',recordSHA256:'record-digest',
+    compositionPreview:'data:image/png;base64,composition'});
+  h.result.quality.sourceSHA256='source-digest';
+}
+
+test('crop saves only after explicit confirmation and leaves the full report and PS documents alone',async()=>{
+  const h=panel();croppable(h);await h.select();await h.execute();
+  assert.equal(h.get('stackCoveragePreview').src,h.result.compositionPreview);
+  h.get('stackCoverageView').selectedIndex=0;h.emit('stackCoverageView','change');
+  assert.equal(h.get('stackCoveragePreview').src,h.result.quality.preview);
+  await assert.rejects(h.emit('stackCropSave'),/确认裁剪/);assert.equal(h.calls.jobs.length,2);
+  h.get('stackCropConfirmed').checked=true;h.emit('stackCropConfirmed','change');assert.equal(h.get('stackCropSave').disabled,false);
+  h.saved=file('crop.dng');await h.emit('stackCropSave');
+  assert.deepEqual(h.calls.jobs.at(-1),{op:'stackCrop',source:h.result.output,output:h.saved.nativePath,confirmed:true,
+    crop:h.result.quality.crop,sourceSHA256:'source-digest',recordSHA256:'record-digest'});
+  assert.equal(h.calls.saved.at(-1).file,h.saved);assert.equal(h.calls.saved.at(-1).format,'dng');
+  assert.equal(h.calls.open.length,1);assert.equal(h.calls.layered.length,0);
+  assert.equal(h.get('stackCropConfirmed').checked,false);assert.match(h.get('stackCropSaved').textContent,/8 × 6.*完整母版/);
+  assert.equal(h.get('stackCoveragePreview').src,h.result.quality.preview);
+});
+
+test('canceling the crop picker keeps confirmation and does not start another job',async()=>{
+  const h=panel();croppable(h);await h.select();await h.execute();
+  h.get('stackCropConfirmed').checked=true;h.saved=null;await h.emit('stackCropSave');
+  assert.equal(h.calls.jobs.length,2);assert.equal(h.get('stackCropConfirmed').checked,true);
+  assert.equal(h.get('stackCropSave').disabled,false);
+});
+
+test('crop cancellation uses the active job and allows a retry without discarding its source report',async()=>{
+  const h=panel();croppable(h);await h.select();await h.execute();h.saved=file('crop.dng');
+  h.get('stackCropConfirmed').checked=true;let finish;h.gate=new Promise(resolve=>{finish=resolve;});
+  h.failure=new Error('crop canceled');const pending=h.emit('stackCropSave');await new Promise(setImmediate);
+  assert.equal(h.get('stackCancel').disabled,false);assert.equal(h.get('stackCropConfirmed').disabled,true);
+  await h.emit('stackCancel');assert.equal(h.calls.api.at(-1)[0],'/jobs/stack-job');
+  finish();await assert.rejects(pending,/crop canceled/);
+  assert.equal(h.get('stackCropSave').disabled,false);assert.equal(h.get('stackCancel').disabled,true);
+  assert.equal(h.get('stackCoveragePreview').src,h.result.compositionPreview);
+});
+
+test('legacy reports can export counts but cannot enable unverified crop writes',async()=>{
+  const h=panel();reported(h);await h.select();await h.execute();
+  assert.equal(h.get('stackCoverageSave').disabled,false);assert.equal(h.get('stackCropSave').disabled,true);
+  assert.match(h.get('stackCropHint').textContent,/缺少母版来源校验/);
+  await assert.rejects(h.emit('stackCropSave'),/带来源校验/);
 });

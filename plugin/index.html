@@ -137,9 +137,13 @@
   <div id="stackQualitySettings" class="collapsed">
     <div id="stackQualitySummary" class="hint">堆栈完成后查看逐帧配准与覆盖情况；不会自动丢帧或裁剪。</div>
     <div id="stackQualityRows" class="muted"></div>
-    <img id="stackCoveragePreview" alt="几何覆盖与建议裁剪框">
+    <sp-picker id="stackCoverageView"><sp-menu><sp-menu-item>几何覆盖图</sp-menu-item><sp-menu-item>裁剪构图（缩小示意）</sp-menu-item></sp-menu></sp-picker>
+    <img id="stackCoveragePreview" alt="堆栈覆盖或裁剪构图与建议框">
     <div id="stackCoverageHint" class="hint"></div>
     <button id="stackCoverageSave" disabled>导出完整覆盖计数图…</button>
+    <label class="processCompare"><input id="stackCropConfirmed" type="checkbox" disabled> 已检查建议框，确认另存此裁剪范围</label>
+    <button id="stackCropSave" disabled>另存裁剪副本…</button>
+    <div id="stackCropHint" class="hint"></div><div id="stackCropSaved" class="hint"></div>
   </div>
 </section>
 <script src="main.js"></script>

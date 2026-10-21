@@ -5,6 +5,7 @@ import tempfile
 import time
 
 from .stack_io import write_result
+from .stack_quality import file_sha256
 
 
 def layer_targets(output, format):
@@ -35,6 +36,8 @@ def save_layers(targets, image, reference, meta, format, summary, started, check
             check()
         write_result(work/targets['reference'].name, reference, meta, 'tiff32', calibration=summary['calibration'])
         check()
+        if 'quality' in summary:
+            summary['quality']['sourceSHA256'] = file_sha256(work/output.name,check)
         summary.update(encoding=encoding, photoshopOutput=str(targets['sky']),
                        seconds=round(time.monotonic()-started, 2),
                        layers={'sky': str(targets['sky']), 'reference': str(targets['reference']),

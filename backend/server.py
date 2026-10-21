@@ -99,6 +99,10 @@ class Store:
                             def message(text):
                                 job["message"] = text
                             job["result"] = stack(request,self.path,progress,message,lambda:job.get("cancel",False))
+                    elif operation == "stackCrop":
+                        from .stack_crop import crop_stack
+                        job["message"] = "校验母版并保存裁剪副本…"
+                        job["result"] = crop_stack(request,progress,lambda:job.get("cancel",False))
                     elif operation in ("prepareInspect", "prepareLinear"):
                         from .linear_preparation import inspect_master, prepare_master
                         job["message"] = "检查线性母版…" if operation == "prepareInspect" else "创建独立的32位范围准备副本…"
@@ -252,7 +256,7 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                if operation in ("processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchCheck", "stretchRender", "stretchSave") and job.get("cancel"):
+                if operation in ("stackCrop", "processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchCheck", "stretchRender", "stretchSave") and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
                     if operation == "stack" and getattr(e,"failed_file",None):
