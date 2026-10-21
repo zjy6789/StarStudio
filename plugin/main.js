@@ -6,7 +6,7 @@ let docID = null, layerList = [], busy = false, updatingPickers=false;
 let currentPage='stack', serviceReady=false, documentSnapshot=null, panelVisible=true;
 let settingsFile=null, settingsWrite=Promise.resolve();
 let modelInfo=null, acceptedLicenses=[];
-let stackUI=null, processUI=null, prepareUI=null;
+let stackUI=null, processUI=null, prepareUI=null, backgroundUI=null;
 const pickerValues = {};
 let blendSourceKey=null;
 const photoStages=new Map();
@@ -113,18 +113,18 @@ function workingDocument() {
   if(!doc) throw new Error('请打开源照片。');
   return host.documentInfo(doc);
 }
-function isPreview(id) { return id!=null && id===processUI?.previewDocumentID(); }
+function isPreview(id) { return id!=null && (id===processUI?.previewDocumentID() || id===backgroundUI?.previewDocumentID()); }
 function refresh(followActive=false) {
   const doc=workingDocument();
   const previous=doc.id===docID;
   layerList=host.layers(doc); docID=doc.id;
   const options=layerList.map(x=>({label:x.name, value:x.id}));
-  for (const id of ['source','processSource','processBackground']) {
+  for (const id of ['source','processSource','processBackground','backgroundSource']) {
     const old=previous?value(id):null;
     if(id==='source') {
       const active=doc.activeLayers[0]?.id;
       choose(id,options,followActive?active:options.some(x=>x.value===old)?old:active);
-    } else choose(id,[{label:id==='processBackground'?'不使用背景图层':'选择星点图层',value:null},...options],options.some(x=>x.value===old)?old:null);
+    } else choose(id,[{label:id==='processBackground'?'不使用背景图层':id==='backgroundSource'?'选择照片或背景图层':'选择星点图层',value:null},...options],options.some(x=>x.value===old)?old:null);
   }
   refreshBlendModes(doc);
   $('documentName').textContent=doc.title+' · '+doc.width+' × '+doc.height;
@@ -167,6 +167,7 @@ function updateActions() {
   if(stackUI) stackUI.updateActions(busy);
   if(processUI) processUI.updateActions(busy);
   if(prepareUI) prepareUI.updateActions(busy);
+  if(backgroundUI) backgroundUI.updateActions(busy);
 }
 function syncLayers() {
   if (busy || processUI?.isModalBusy()) return;
@@ -176,14 +177,16 @@ function syncLayers() {
     documentSnapshot=next;
     if (!next) {
       docID=null; layerList=[];
-      for (const id of ['source','processSource','processBackground']) choose(id,[],null);
+      for (const id of ['source','processSource','processBackground','backgroundSource']) choose(id,[],null);
       $('documentName').textContent='未打开照片'; if(!['stack','prepare'].includes(currentPage)) status('请先打开一张照片。');
       if(processUI) processUI.sync(next,old);
+      if(backgroundUI) backgroundUI.sync(next,old);
       updateActions(); return;
     }
     const changed=!old || old.id!==next.id;
     refresh(changed || old.active!==next.active);
     if(processUI) processUI.sync(next,old);
+    if(backgroundUI) backgroundUI.sync(next,old);
     if (changed && !['stack','prepare'].includes(currentPage)) status('选择图层后即可处理。');
     updateActions();
   } catch(e) { status(e.message,true); updateActions(); }
@@ -209,7 +212,7 @@ async function ensureService() {
 }
 function showPage(page) {
   currentPage=page;
-  for(const name of ['stack','prepare','separate','process']) {
+  for(const name of ['stack','prepare','background','separate','process']) {
     $(name+'Page').classList.toggle('active',name===page);
     $(name+'Tab').classList.toggle('selected',name===page);
     $(name+'Tab').setAttribute('aria-selected',String(name===page));
@@ -218,6 +221,7 @@ function showPage(page) {
   if(page==='stack') status('选择一批照片或文件夹；无需在 Photoshop 中打开素材。');
   if(page==='prepare') status('选择未拉伸的 Star Studio 32位线性TIFF母版，先检查范围，再创建独立副本。');
   if(page==='process') status('选择星点图层和可选背景，自动在 Photoshop 中预览。');
+  if(page==='background') status('选择已显影照片或无星背景，生成建议并检查主体保护。');
   processUI?.pageChanged();
 }
 async function restoreModelSettings() {
@@ -374,7 +378,7 @@ $('photoStage').addEventListener('change',()=>{
 });
 $('photoScene').addEventListener('change',()=>{inputState();if(settingsFile) saveModelSettings();});
 $('executable').value=config.starnet || '';
-for (const page of ['stack','prepare','separate','process']) $(page+'Tab').addEventListener('click',()=>showPage(page));
+for (const page of ['stack','prepare','background','separate','process']) $(page+'Tab').addEventListener('click',()=>showPage(page));
 $('modelOptions').addEventListener('click',()=>$('modelSettings').classList.toggle('expanded'));
 for(const id of ['stride','decomposition','executable']) $(id).addEventListener('change',()=>{if(settingsFile) saveModelSettings();});
 $('preserveModelBackground').addEventListener('change',()=>{updateActions();if(settingsFile) saveModelSettings();});
@@ -400,6 +404,7 @@ $('acceptModelLicense').addEventListener('change',()=>{
 });
 $('extract').addEventListener('click',()=>run(extract));
 prepareUI=require('./linear-preparation.js').setup({run,api,job,status,isBusy:()=>busy,onOpened:doc=>{photoStages.set(doc.id,'linear');refresh();}});
+backgroundUI=require('./background.js').setup({run,api,job,status,report,selectedLayer,useActive,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,stage:doc=>photoStages.get(doc.id) || 'unknown',onApplied:doc=>{photoStages.set(doc.id,'developed');refresh();documentSnapshot=snapshot();}});
 stackUI=require('./stack.js').setup({run,api,job,status,onSaved:(file,format)=>prepareUI.setLastMaster(file,format)});
 processUI=require('./star-processing.js').setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,starEncoding:(doc,layer)=>starRelation(doc,layer).encoding,refreshBlendModes:()=>refreshBlendModes(workingDocument()),ensureService,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,currentPage:()=>currentPage});
 syncLayers();

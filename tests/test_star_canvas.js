@@ -91,6 +91,22 @@ test('original preview opens at source resolution with native stars/background a
   assert.equal(h.reads(),0);assert.equal(h.writes.length,0);
 });
 
+for(const size of [8,16,32]) test(`${size}-bit background preview and output use native float copies without touching the source`,async()=>{
+  const h=setup(size);h.meta.size=32;h.meta.id='input';h.original.visible=true;
+  const sourceLayers=h.source.layers.slice(),originalOpacity=h.original.opacity;
+  const state=await h.host.canvasBackgroundPreview(null,'corrected',h.meta,'result',h.api,()=>{});
+  const preview=h.app.documents.find(d=>d.id===state.docID);
+  assert.equal(preview.bitsPerChannel,32);assert.equal(preview.profile,h.source.profile);
+  assert.equal(preview.layers.length,2);assert.equal(preview.layers.find(l=>l.id===state.originalID).visible,false);
+  assert.ok(h.writes.every(w=>w.imageData.raw instanceof Float32Array));
+  const original=await h.host.canvasBackgroundPreview(state,null,h.meta,'original',h.api,()=>{});
+  assert.equal(original.docID,state.docID);assert.equal(preview.layers.find(l=>l.id===state.originalID).visible,true);
+  const doc=await h.host.applyBackgroundResult(h.meta,'corrected',h.api,()=>{});
+  assert.equal(doc.bitsPerChannel,32);assert.equal(doc.layers.length,2);
+  assert.equal(doc.layers[0].layers[0].name,'原输入 · 32位读取副本');assert.equal(doc.layers[0].opacity,0);
+  assert.deepEqual(h.source.layers,sourceLayers);assert.equal(h.source.bitsPerChannel,size);assert.equal(h.original.opacity,originalOpacity);assert.equal(h.original.visible,true);
+});
+
 for(const size of [8,16,32]) test(`${size}-bit application isolates the chosen pair and replaces only related prior outputs`,async()=>{
   const h=setup(size),unrelated=h.layer(h.source,'unrelated user content');unrelated.visible=true;
   h.source.layers.push(unrelated);h.original.visible=true;h.backdrop.visible=true;

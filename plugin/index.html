@@ -11,7 +11,27 @@
   <div class="row"><label>拍摄场景</label><sp-picker id="photoScene"><sp-menu><sp-menu-item>银河 / 带地景</sp-menu-item><sp-menu-item>深空</sp-menu-item></sp-menu></sp-picker></div>
   <div id="sceneHint" class="muted"></div>
 </div>
-<div class="tabs" role="tablist"><button id="stackTab" class="tab selected" role="tab" aria-selected="true">堆栈</button><button id="prepareTab" class="tab" role="tab" aria-selected="false">母版准备</button><button id="separateTab" class="tab" role="tab" aria-selected="false">星点分离</button><button id="processTab" class="tab" role="tab" aria-selected="false">星点加工</button></div>
+<div class="tabs" role="tablist"><button id="stackTab" class="tab selected" role="tab" aria-selected="true">堆栈</button><button id="prepareTab" class="tab" role="tab" aria-selected="false">母版准备</button><button id="backgroundTab" class="tab" role="tab" aria-selected="false">背景校正</button><button id="separateTab" class="tab" role="tab" aria-selected="false">星点分离</button><button id="processTab" class="tab" role="tab" aria-selected="false">星点加工</button></div>
+<section id="backgroundPage" class="page" role="tabpanel">
+  <label>照片或无星背景图层</label><div class="row"><sp-picker id="backgroundSource"><sp-menu></sp-menu></sp-picker><button id="backgroundUseActive">用当前图层</button></div>
+  <div class="hint">先确认「照片阶段」为已显影。大尺度渐变校正不会降噪，不代替平场；满幅星云或没有可靠天空时请跳过。</div>
+  <button id="backgroundGenerate" class="primary">生成背景建议并预览</button>
+  <img id="backgroundSamples" alt="背景采样位置示意">
+  <div id="backgroundSummary" class="hint">请生成建议，检查取样与拟合背景。</div>
+  <button id="backgroundOptions" class="disclosure">主体保护与取样 ▾</button>
+  <div id="backgroundSettings" class="collapsed">
+    <div class="hint">回到源照片，用套索或快速蒙版涂选银河、星云、地景，再点「选区保护主体」。也可选中分散的可靠天空后，限定背景取样。两类选区分别记录，保护优先。</div>
+    <div class="row"><button id="backgroundProtect">选区保护主体</button><button id="backgroundSample">选区限定背景</button><button id="backgroundClear">清除选区记录</button></div>
+    <div id="backgroundMaskHint" class="hint"></div>
+  </div>
+  <div class="row"><label>校正强度</label><input id="backgroundStrength" type="number" min="0" max="1" step="0.05" value="0.5"></div>
+  <input id="backgroundStrengthRange" type="range" min="0" max="1" step="0.05" value="0.5">
+  <div class="row"><sp-picker id="backgroundView"><sp-menu><sp-menu-item>校正结果</sp-menu-item><sp-menu-item>拟合背景模型</sp-menu-item><sp-menu-item>原输入</sp-menu-item></sp-menu></sp-picker><button id="backgroundPreview">更新预览</button></div>
+  <div id="backgroundPreviewHint" class="hint">在 Photoshop 新标签页完整分辨率预览。所有调整从本次输入快照重算。</div>
+  <label class="processCompare"><input id="backgroundReviewed" type="checkbox"> 已检查取样与模型，确认没有把主体当作背景</label>
+  <div class="hint">输出到独立32位副本的新图层，保留原输入、ICC和合法负值/高光。原文档不变。32位显示可能与原8/16位不同，比较以副本中的原输入为准。</div>
+  <div class="row"><button id="backgroundExecute" class="primary execute">创建背景校正副本</button><button id="backgroundCancel" disabled>取消</button></div>
+</section>
 <section id="preparePage" class="page" role="tabpanel">
   <div class="row"><button id="prepareChoose">选择线性母版…</button><button id="prepareUseLast">使用刚保存的32位母版</button></div>
   <div class="hint">首版支持 Star Studio 导出的未拉伸32位线性ProPhoto RGB TIFF。DNG请先保留原件；需要本流程时，从堆栈另存32位TIFF。外来ICC、灰度、透明通道和无覆盖NaN暂不自动准备。</div>

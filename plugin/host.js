@@ -28,6 +28,7 @@ async function upload(doc, layer, api, report) {
   const n = doc.mode === constants.DocumentMode.RGB ? 3 : 1;
   const components = n + 1;
   const {id} = await api('/images', {width, height, components});
+  try {
   const bounds = layer.boundsNoEffects;
   const left = Math.max(0, Math.floor(bounds.left)), right = Math.min(width, Math.ceil(bounds.right));
   const top = Math.max(0, Math.floor(bounds.top)), bottom = Math.min(height, Math.ceil(bounds.bottom));
@@ -72,6 +73,10 @@ async function upload(doc, layer, api, report) {
     report((y+rows)/height);
   }
   return {id, width, height, components, size, profile, colorSpace:n===3?'RGB':'Grayscale', docID:doc.id, layerID:layer.id, name:layer.name};
+  } catch(error) {
+    try {await api('/images/'+id,undefined,false,'DELETE');} catch(cleanup) {console.error(cleanup);}
+    throw error;
+  }
 }
 
 async function write(doc, key, meta, name, api, report, context, existingLayer) {
@@ -216,6 +221,109 @@ async function transaction(doc, commandName, action) {
   }, {commandName});
 }
 
+async function uploadSelection(doc, api, report) {
+  const bounds=doc.selection.bounds;
+  if(!bounds) throw new Error('请回到源照片，用套索或快速蒙版建立选区，再读取该选区。');
+  const width=doc.width,height=doc.height;
+  const {id}=await api('/images',{width,height,components:1});
+  try {
+    const block=Math.max(1,Math.floor(8*1024*1024/(width*4)));
+    let selected=false;
+    for(let y=0;y<height;y+=block) {
+      const rows=Math.min(block,height-y),data=new Float32Array(width*rows);
+      const top=Math.max(y,Math.floor(bounds.top)),bottom=Math.min(y+rows,Math.ceil(bounds.bottom));
+      if(top<bottom) {
+        const pixels=await imaging.getSelection({documentID:doc.id,sourceBounds:{left:0,top,right:width,bottom}});
+        try {
+          if(pixels.imageData) {
+            const info=pixels.imageData,raw=await info.getData({chunky:true,fullRange:true});
+            const divisor=info.componentSize===8?255:info.componentSize===16?65535:1;
+            const actual=pixels.sourceBounds,iw=info.width,ih=info.height;
+            for(let yy=0;yy<ih;yy++)for(let x=0;x<iw;x++) {
+              const value=raw[yy*iw+x]/divisor;
+              data[(actual.top-y+yy)*width+actual.left+x]=value;
+              if(value>0) selected=true;
+            }
+          }
+        } finally {pixels.imageData?.dispose();}
+      }
+      await api('/images/'+id+'?y='+y+'&rows='+rows,data.buffer);report((y+rows)/height);
+    }
+    if(!selected) throw new Error('当前选区为空；请建立主体保护或天空背景选区。');
+    return id;
+  } catch(error) {await api('/images/'+id,undefined,false,'DELETE');throw error;}
+}
+
+async function uploadBackground(doc,layer,api,report) {
+  if(doc.bitsPerChannel===constants.BitsPerChannelType.THIRTYTWO) return upload(doc,layer,api,report);
+  // PS 27.1 can fail when getPixels directly requests 32-bit from an integer
+  // document. Let PS convert an isolated copy, then read its native float data.
+  const previous=app.activeDocument,copy=await doc.duplicate('背景读取临时副本',true);
+  try {
+    const old=Array.from(copy.layers),input=await layer.duplicate(copy);
+    input.visible=true;input.opacity=100;input.blendMode=constants.BlendMode.NORMAL;
+    for(const item of old) await item.delete();
+    copy.bitsPerChannel=constants.BitsPerChannelType.THIRTYTWO;
+    const meta=await upload(copy,input,api,report);
+    return {...meta,docID:doc.id,layerID:layer.id,name:layer.name};
+  } finally {
+    await copy.closeWithoutSaving();
+    if(previous && app.documents.some(d=>d.id===previous.id)) app.activeDocument=previous;
+  }
+}
+
+async function backgroundDocument(meta,title,api,report,context) {
+  const source=app.documents.find(d=>d.id===meta.docID);
+  if(!source) throw new Error('背景来源照片已关闭。');
+  const doc=await source.duplicate(title,true);
+  try {
+    doc.bitsPerChannel=constants.BitsPerChannelType.THIRTYTWO;
+    const copied=Array.from(doc.layers);
+    const original=await write(doc,meta.id,{...meta,size:32},'原输入 · 32位读取副本',api,report,context);
+    for(const layer of copied) await layer.delete();
+    original.visible=true;
+    return {doc,original};
+  } catch(error) {await doc.closeWithoutSaving();throw error;}
+}
+
+async function canvasBackgroundPreview(state,key,meta,title,api,report) {
+  return core.executeAsModal(async context=>{
+    let doc=app.documents.find(d=>d.id===state?.docID);
+    let created=false;
+    if(!doc) {
+      const made=await backgroundDocument(meta,'背景校正预览 · '+meta.name,api,report,context);
+      doc=made.doc;state={docID:doc.id,originalID:made.original.id};created=true;
+    }
+    const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'更新背景校正预览'});
+    try {
+      let layer=doc.layers.find(l=>l.id===state.layerID);
+      if(key && key!==state.image) layer=await write(doc,key,{...meta,size:32},title,api,report,context,layer);
+      if(layer) {layer.name=title;layer.visible=!!key;}
+      doc.layers.find(l=>l.id===state.originalID).visible=!key;
+      await context.hostControl.resumeHistory(history);
+      app.activeDocument=doc;
+      return {...state,layerID:layer?.id,image:key};
+    } catch(error) {
+      await context.hostControl.resumeHistory(history,false);
+      if(created) await doc.closeWithoutSaving();
+      throw error;
+    }
+  },{commandName:'背景校正预览'});
+}
+
+async function applyBackgroundResult(meta,key,api,report) {
+  return core.executeAsModal(async context=>{
+    const {doc,original}=await backgroundDocument(meta,meta.name+' · 背景校正',api,report,context);
+    const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'应用背景梯度校正'});
+    try {
+      const layer=await write(doc,key,{...meta,size:32},meta.name+'_gradient_corrected',api,report,context);
+      await archiveLayer(doc,original);
+      await context.hostControl.resumeHistory(history);
+      app.activeDocument=doc;return doc;
+    } catch(error) {await context.hostControl.resumeHistory(history,false);await doc.closeWithoutSaving();throw error;}
+  },{commandName:'创建32位背景校正副本'});
+}
+
 function findLayer(doc, id) {
   function walk(items) {
     for(const layer of items) {
@@ -266,4 +374,4 @@ async function applyStarResult({doc,source,background,blend,result,meta,previous
   });
 }
 
-module.exports = {app, core, imaging, constants, layers, findLayer, archiveLayer, documentInfo, upload, write, starBlendModes, starEncoding, setStarBlendMode, canvasStarPreview, transaction, applyStarResult};
+module.exports = {app, core, imaging, constants, layers, findLayer, archiveLayer, documentInfo, upload, write, starBlendModes, starEncoding, setStarBlendMode, canvasStarPreview, transaction, applyStarResult, uploadSelection, uploadBackground, canvasBackgroundPreview, applyBackgroundResult};

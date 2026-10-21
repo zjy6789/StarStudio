@@ -8,9 +8,9 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前源码为 **0.8.0 Beta 候选**，新增线性母版范围准备，保留开始引导、分离衔接及星点加工。GitHub 已发布安装包仍为 **0.6.0 Beta**；源码与已发布安装包请分别核对。干净电脑安装及其他 Photoshop 版本尚未验证。详见 [VALIDATION.md](VALIDATION.md)。
+> 当前源码为 **0.9.0 Beta 候选**，新增背景梯度校正，保留线性母版准备、开始引导、分离衔接及星点加工。GitHub 已发布安装包仍为 **0.6.0 Beta**；源码与已发布安装包请分别核对。干净电脑安装及其他 Photoshop 版本尚未验证。详见 [VALIDATION.md](VALIDATION.md)。
 
-> 已完成调研报告中的 T1–T3，本轮新增T4的有限来源准备入口；背景梯度和受保护拉伸仍是后续任务。见 [T1/T2回退记录](docs/ITERATION_T1_T2_2026-10-18.md)、[T3参数与比较](docs/ITERATION_T3_2026-10-18.md)及 [线性准备约定](docs/LINEAR_PREPARATION.md)。
+> 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)和 [背景校正](docs/BACKGROUND_GRADIENT.md)。
 
 > 0.6.0 安装包包含堆栈校准场与 FITS 输出，已验证数值及真实 RAW 暗场/偏置处理。使用规则见 [校准说明](docs/CALIBRATION.md)，测试结果和剩余范围见 [验证记录](VALIDATION.md)。需要在 Siril 继续处理时请选择 32 位 FITS；Siril 1.4.2 不能完整读取本插件 16 位 FITS 的缩放浮点范围。
 
@@ -27,6 +27,15 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 | 相机 RAW | 由捆绑的 LibRaw 支持；DNG 在 Photoshop 中的打开方式由 Camera Raw 决定。 |
 
 无需安装 Python 或 CUDA，即可使用堆栈、曲线、星点缩小、辉光、饱和度和图层混合预览。**星点分离需要另装 StarNet++ CLI；彗差减少需要另装 Siril 1.4.x**。两个外部引擎独立配置，不影响其余功能。
+
+## 背景渐变不均时
+
+1. 在 Photoshop 打开已显影照片，在“照片阶段”确认后，进入 **背景校正**，选择照片或无星背景图层，点击“生成背景建议并预览”。无需先去星。
+2. 检查面板绿点是否落在可靠背景。PS 新标签页提供完整尺寸的校正结果、拟合背景模型和原输入比较；模型包含保留的背景基线，实际只减去起伏。
+3. 如果取样碰到银河、星云或地景，回到源照片，用套索或快速蒙版涂出主体，展开“主体保护与取样”，点击“选区保护主体”再生成。也可用分散的天空选区限定背景。保护只排除拟合，主体仍会接受同一梯度校正。
+4. 调整强度（0恢复输入），检查后勾选确认，点击“创建背景校正副本”。结果在独立 **32位** 文档中保留原输入和新校正层，原文档不动；一次撤销本次输出可恢复副本原输入。
+
+只估计大尺度一阶平面，不自动判断整幅星云的真实背景。取样不足或集中时应修改选区或跳过。透明边缘不参与拟合；未包含在alpha中的低覆盖边缘需手动排除。32位副本保留负值与超1高光，显示可能与原8/16位不同，比较以副本原输入为准。本页暂不处理未准备线性HDR，不代替平场、降噪或科学颜色校准。[完整约定](docs/BACKGROUND_GRADIENT.md)
 
 ## 安装与更新
 

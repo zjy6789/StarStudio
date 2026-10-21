@@ -3,6 +3,28 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const test=require('node:test');
 
+test('a failed float input read deletes its incomplete upload',async()=>{
+  const deleted=[],constants={BitsPerChannelType:{EIGHT:8,SIXTEEN:16},DocumentMode:{RGB:'RGB'}};
+  const context={module:{exports:{}},require:()=>({constants,imaging:{getPixels:async()=>{throw new Error('read failed');}}}),Float32Array};
+  vm.runInNewContext(fs.readFileSync('plugin/host.js','utf8'),context);
+  const api=async(path,body,raw,method)=>{if(method==='DELETE')deleted.push(path);else return {id:'temporary'};};
+  await assert.rejects(context.module.exports.upload({id:1,width:4,height:4,bitsPerChannel:32,mode:'RGB'},
+    {id:2,name:'input',boundsNoEffects:{left:0,top:0,right:4,bottom:4}},api,()=>{}),/read failed/);
+  assert.deepEqual(deleted,['/images/temporary']);
+});
+
+test('PS selection upload preserves offset coverage and normalizes its actual component size',async()=>{
+  let disposed=false,sent;
+  const context={module:{exports:{}},Float32Array,require:()=>({imaging:{getSelection:async options=>({sourceBounds:{left:1,top:1,right:3,bottom:3},imageData:{width:2,height:2,componentSize:16,
+    getData:async()=>new Uint16Array([65535,0,32768,65535]),dispose:()=>{disposed=true;}}})}})};
+  vm.runInNewContext(fs.readFileSync('plugin/host.js','utf8'),context);
+  const api=async(path,body)=>{if(path==='/images')return {id:'selection'};sent=new Float32Array(body);};
+  const id=await context.module.exports.uploadSelection({id:1,width:4,height:3,selection:{bounds:{left:1,top:1,right:3,bottom:3}}},api,()=>{});
+  assert.equal(id,'selection');assert.equal(disposed,true);
+  assert.deepEqual(Array.from(sent),Array.from(new Float32Array([0,0,0,0,0,1,0,0,0,32768/65535,1,0])));
+  await assert.rejects(context.module.exports.uploadSelection({selection:{bounds:null}},()=>{throw new Error('must not allocate');},()=>{}),/选区/);
+});
+
 for(const size of [8,16,32]) for(const n of [1,3]) for(const alpha of [false,true]) for(const cropped of [false,true]) {
   test(`${size}-bit ${n}-channel upload preserves ${alpha?'alpha':'opaque'} ${cropped?'offset pixels':'full width'}`,async()=>{
     const components=n+1,rawComponents=alpha?components:n;

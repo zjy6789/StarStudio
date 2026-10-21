@@ -60,6 +60,7 @@ function panel(options={}) {
       if(name==='uxp')return {storage:{localFileSystem:storage},shell:{openPath:async(...args)=>{calls.launch.push(args);return h.launchError;}}};
       if(name==='./stack.js')return {setup:options=>{stackSetups++;h.stackOptions=options;return {updateActions(){}};}};
       if(name==='./linear-preparation.js')return {setup:options=>{prepareSetups++;h.prepareOptions=options;return {updateActions(){},setLastMaster:(file,format)=>{h.lastMaster={file,format};}};}};
+      if(name==='./background.js')return {setup:options=>{h.backgroundOptions=options;return {updateActions(){},sync(){},previewDocumentID:()=>h.backgroundPreviewID};}};
       if(name==='./star-processing.js')return {setup:options=>{processSetups++;h.processOptions=options;return processUI;}};
       throw new Error('Unexpected require '+name);
     }
@@ -94,6 +95,17 @@ test('the full panel starts on stack, restores model settings, and leaves star/b
   }
   assert.equal(h.calls.pages,4);
   assert.ok(h.calls.requests.every(request=>['/health','/starnet-info'].includes(request.route)));
+});
+
+test('background preview remains associated with its source and an applied copy is marked developed',async()=>{
+  const h=panel();await h.settle();await h.emit('backgroundTab');
+  assert.equal(h.get('backgroundPage').classList.contains('active'),true);
+  assert.equal(h.backgroundOptions.stage(h.doc),'unknown');
+  const source=h.doc;h.backgroundPreviewID=88;h.host.app.documents.push({id:88});h.host.app.activeDocument=h.host.app.documents[1];
+  await h.tick(800);assert.match(h.get('documentName').textContent,/Test/);
+  const result={...source,id:99,title:'corrected'};h.host.app.documents.push(result);h.host.app.activeDocument=result;
+  h.backgroundOptions.onApplied(result);assert.equal(h.backgroundOptions.stage(result),'developed');
+  assert.match(h.get('documentName').textContent,/corrected/);
 });
 
 test('start guidance offers a current-photo path without forcing a stack and works without a document',async()=>{

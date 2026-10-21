@@ -30,6 +30,7 @@ class Store:
         self.worker = threading.Lock()
         self.preview_key = None
         self.processing_cache = {}
+        self.background_models = {}
 
     def create(self, w, h, c):
         if not (0 < w <= 65536 and 0 < h <= 65536 and w*h <= 250_000_000 and c in (1, 2, 3, 4)):
@@ -65,6 +66,7 @@ class Store:
         return key
 
     def delete(self, key):
+        self.background_models.pop(key, None)
         entry = self.images.pop(key)
         entry["data"]._mmap.close()
         (self.path / f"{key}.npy").unlink()
@@ -100,6 +102,33 @@ class Store:
                         canceled = lambda: job.get("cancel", False)
                         job["result"] = (inspect_master(request["path"], progress, canceled) if operation == "prepareInspect"
                                          else prepare_master(request, progress, canceled))
+                    elif operation in ("backgroundFit", "backgroundRender"):
+                        from .background import fit_background, render_background
+                        image_id = request["image"]
+                        image = self.get(image_id)
+                        canceled = lambda: job.get("cancel", False)
+                        job["message"] = "生成背景取样与稳健平面…" if operation == "backgroundFit" else "渲染完整尺寸背景预览…"
+                        if operation == "backgroundFit":
+                            self.background_models.pop(image_id, None)
+                            model = fit_background(image,
+                                self.get(request["protection"]) if request.get("protection") else None,
+                                self.get(request["sampling"]) if request.get("sampling") else None, progress, canceled)
+                            self.background_models[image_id] = model
+                            job["result"] = model
+                        else:
+                            if image_id not in self.background_models:
+                                raise ValueError("背景模型已失效，请重新生成建议。")
+                            output_id = self.create(image.shape[1], image.shape[0], image.shape[2])
+                            try:
+                                entry = self.images[output_id]
+                                stats = render_background(image, self.background_models[image_id], entry["data"],
+                                                          request["strength"], request.get("view", "result"), progress, canceled)
+                                entry["data"].flush()
+                                entry.update(ready=True, rows=image.shape[0])
+                                job["result"] = {"image": output_id, "stats": stats}
+                            except Exception:
+                                self.delete(output_id)
+                                raise
                     elif operation == "processStars":
                         from .star_processing import process_stars, curve_values
                         if job.get("cancel"):
@@ -172,7 +201,7 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                if operation in ("processStars", "prepareInspect", "prepareLinear") and job.get("cancel"):
+                if operation in ("processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender") and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
                     job.update(state="error", error=str(e))
