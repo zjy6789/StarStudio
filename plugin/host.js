@@ -366,9 +366,9 @@ async function openStackLayers(skyFile,referenceFile,summary) {
       for(const copy of copies)await copy.delete();
       if((await folder.getEntries()).length)throw new Error('临时目录含其他条目，已保留。');
       await folder.delete();
-    }catch(e){cleanupWarning='临时副本清理未完成：'+e.message;}
+    }catch(e){cleanupWarning='临时副本清理未完成：'+(e.message || String(e));}
   }
-  if(error)throw new Error(error.message+(cleanupWarning?'；'+cleanupWarning:''));
+  if(error)throw new Error((error.message || String(error))+(cleanupWarning?'；'+cleanupWarning:''));
   return {doc:result,cleanupWarning};
 }
 

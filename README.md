@@ -8,9 +8,9 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前源码为 **0.10.0 Beta 候选**，新增受保护线性提亮，保留背景校正、母版准备、分离衔接及星点加工。GitHub 已发布安装包仍为 **0.6.0 Beta**；源码与已发布安装包请分别核对。干净电脑安装及其他 Photoshop 版本尚未验证。详见 [VALIDATION.md](VALIDATION.md)。
+> 当前开发分支源码为 **0.11.0 开发中**，新增参考地景分层输出仍在Photoshop原生调试，尚未作为完成版本交付。main已验证候选为 **0.10.0**，包含受保护线性提亮、背景校正、母版准备和星点加工。源码与已发布安装包请分别核对；当前验证状态见 [VALIDATION.md](VALIDATION.md)。
 
-> 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)和 [背景校正](docs/BACKGROUND_GRADIENT.md)。
+> 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 
 > 0.6.0 安装包包含堆栈校准场与 FITS 输出，已验证数值及真实 RAW 暗场/偏置处理。使用规则见 [校准说明](docs/CALIBRATION.md)，测试结果和剩余范围见 [验证记录](VALIDATION.md)。需要在 Siril 继续处理时请选择 32 位 FITS；Siril 1.4.2 不能完整读取本插件 16 位 FITS 的缩放浮点范围。
 

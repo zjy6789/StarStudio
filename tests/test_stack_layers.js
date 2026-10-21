@@ -19,7 +19,7 @@ function nativeHost() {
   const folder={nativePath:'G:/temp/starstudio-stack-owned',entries:[],deleted:false,
     getEntries:async()=>folder.entries,delete:async()=>{assert.equal(folder.entries.length,0);folder.deleted=true;}};
   function file(name) {return {name,nativePath:'G:/results/'+name,copyTo:async target=>{
-    assert.equal(target,folder);if(name==='reference'&&h.copyFailure)throw new Error('copy failed');
+    assert.equal(target,folder);if(name==='reference'&&h.copyFailure)throw (h.copyFailure===true?new Error('copy failed'):h.copyFailure);
     const copy={name,nativePath:folder.nativePath+'/'+name,delete:async()=>{folder.entries=folder.entries.filter(e=>e!==copy);}};
     folder.entries.push(copy);copies.push(copy);return copy;}};}
   const storage={getTemporaryFolder:async()=>({createFolder:async name=>{assert.match(name,/^starstudio-stack-\d+$/);return folder;}}),
@@ -73,4 +73,9 @@ test('unexpected temporary entries are preserved and a completed result reports 
   const h=nativeHost(),unknown={name:'other file'};h.folder.entries.push(unknown);
   const result=await h.run();assert.ok(result.doc);assert.match(result.cleanupWarning,/清理未完成/);
   assert.equal(h.folder.deleted,false);assert.deepEqual(h.folder.entries,[unknown]);assert.equal(h.app.documents.length,2);
+});
+
+test('native SDK string rejections retain their reason at the user error boundary',async()=>{
+  const h=nativeHost();h.copyFailure='Native copy rejected';await assert.rejects(h.run(),/Native copy rejected/);
+  assert.equal(h.folder.deleted,true);assert.equal(h.app.activeDocument,h.retained);
 });
