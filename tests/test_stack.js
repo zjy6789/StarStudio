@@ -30,8 +30,8 @@ function panel() {
     calls.layered.push(args);if(h.layerFailure)throw h.layerFailure;return {doc:{id:99},cleanupWarning:''};}};
   const photoshop={action:{batchPlay:async commands=>{calls.open.push(plain(commands));return h.openResult;}}};
   const context={module:{exports:{}},document:{getElementById:get,addEventListener:(name,action)=>documentEvents.set(name,action)},
-    btoa:s=>Buffer.from(s).toString('base64'),
-    require:name=>name==='./host.js'?host:name==='uxp'?{storage:{localFileSystem:storage}}:photoshop};
+    btoa:s=>Buffer.from(s).toString('base64'),atob:s=>Buffer.from(s,'base64').toString('binary'),
+    require:name=>name==='./host.js'?host:name==='uxp'?{storage:{localFileSystem:storage,formats:{binary:'binary'}}}:photoshop};
   vm.runInNewContext(fs.readFileSync('plugin/stack.js','utf8'),context);
   h.ui=context.module.exports.setup({
     run:async action=>{h.ui.updateActions(true);try{return await action();}finally{h.ui.updateActions(false);}},
@@ -44,7 +44,7 @@ function panel() {
       started('stack-job');
       if(h.gate)await h.gate;
       if(h.failure)throw h.failure;
-      return {frames:3,seconds:1.2,encoding:{scale:1},calibration:{warnings:[]},
+      return {frames:3,seconds:1.2,encoding:{scale:1},calibration:{warnings:[]},...h.result,
         ...(request.referenceGround && !h.missingLayers?{layers:{depth:32,referenceResampled:false}}:{})};
     }
   });
@@ -81,7 +81,7 @@ for(const [index,mode] of ['mean','median','sigma','maximum','minimum'].entries(
     h.get('stackScene').selectedIndex=1;h.emit('stackMode','change');
     assert.match(h.get('stackCache').textContent,index===1||index===2?/2 GB/:/逐张累积/);
     await h.execute();
-    assert.deepEqual(h.calls.jobs[1],{op:'stack',paths:h.inspected.paths,mode,landscape:true,mask:[],format:'dng',
+    assert.deepEqual(h.calls.jobs[1],{op:'stack',paths:h.inspected.paths,mode,landscape:true,mask:[],format:'dng',qualityReport:true,
       output:h.saved.nativePath,calibration:{dark:[],flat:[],bias:[],darkflat:[],linearTiff:false},photoshopOutput:h.saved.nativePath});
     assert.equal(h.calls.open.length,1);
     assert.equal(h.calls.open[0][0].null._path,'token:'+h.saved.nativePath);
@@ -209,4 +209,38 @@ test('native opening failure reports the preserved output directory and allows r
   await assert.rejects(h.execute(),/已保存于.*PS分层打开未完成.*native open failed/);
   assert.equal(folder.deleted,false);assert.equal(h.get('stackExecute').disabled,false);
   h.layerFailure=null;await h.execute();assert.equal(h.calls.opened.length,1);
+});
+
+function reported(h) {
+  h.result={reference:h.inspected.paths[1],alignment:[{file:h.inspected.paths[0],matches:47,rms:.3214}],
+    quality:{minimum:1,maximum:3,frames:3,fullPixels:80,totalPixels:100,
+      crop:{left:1,top:2,right:9,bottom:8},preview:'data:image/png;base64,preview',
+      png:'data:image/png;base64,'+Buffer.from([137,80,78,71,0,255]).toString('base64')}};
+}
+
+test('quality report survives a native opening failure and exports full binary counts',async()=>{
+  const h=panel();reported(h);await h.select();h.openResult=[{_obj:'error',message:'Cannot open'}];
+  await assert.rejects(h.execute(),/Cannot open/);
+  assert.match(h.get('stackQualityRows').textContent,/a.NEF.*47.*0.321/);
+  assert.match(h.get('stackCoverageHint').textContent,/80.0%.*8 × 6.*尚未裁剪.*Sigma/s);
+  assert.equal(h.get('stackCoveragePreview').src,h.result.quality.preview);
+  assert.equal(h.get('stackCoverageSave').disabled,false);
+  let written;
+  h.saved={nativePath:'D:\\coverage.png',write:async(bytes,options)=>{written={bytes:Buffer.from(bytes),options};}};
+  await h.emit('stackCoverageSave');assert.deepEqual(written.bytes,Buffer.from([137,80,78,71,0,255]));
+  assert.equal(written.options.format,'binary');assert.equal(h.calls.jobs.length,2);
+});
+
+test('new input clears stale report while canceled input and export retain it',async()=>{
+  const h=panel();reported(h);await h.select();await h.execute();
+  h.files=null;await h.select();assert.equal(h.get('stackCoveragePreview').src,h.result.quality.preview);
+  h.saved=null;await h.emit('stackCoverageSave');assert.equal(h.get('stackCoverageSave').disabled,false);
+  h.files=[file('a.nef'),file('b.nef')];await h.select();
+  assert.equal(h.get('stackCoveragePreview').src,undefined);assert.equal(h.get('stackCoverageSave').disabled,true);
+});
+
+test('older component has an explicit missing-report message without blocking saved output',async()=>{
+  const h=panel();await h.select();await h.execute();
+  assert.match(h.get('stackCoverageHint').textContent,/没有返回完整覆盖报告.*更新后台/);
+  assert.equal(h.get('stackCoverageSave').disabled,true);assert.equal(h.calls.open.length,1);
 });

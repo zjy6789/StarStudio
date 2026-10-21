@@ -16,6 +16,7 @@ from scipy.spatial import cKDTree
 from .stack_io import ordered_paths, read_frame, preview_png, write_result, RAW_EXTENSIONS
 from .calibration import Calibration, selected_paths
 from .stack_layers import layer_targets, save_layers
+from .stack_quality import coverage_report
 
 MODES = {'mean', 'median', 'sigma', 'maximum', 'minimum'}
 cv2.setNumThreads(min(8, cv2.getNumberOfCPUs()))
@@ -142,6 +143,9 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
     mode = request.get('mode','mean')
     if mode not in MODES:
         raise ValueError('未知堆栈模式。')
+    quality = request.get('qualityReport',False)
+    if not isinstance(quality,bool):
+        raise ValueError('质量报告选项必须为开关值。')
     output = Path(request['output']).resolve()
     format = request.get('format','dng')
     if format not in {'dng','tiff16','tiff32','fits16','fits32'}:
@@ -290,6 +294,9 @@ def stack(request, scratch, progress, message, cancelled=lambda:False):
                            'alignment':records,'color':meta,
                            'resampling':'Lanczos4 once; reference is not resampled',
                            'calibration':calibration_info}
+                if quality:
+                    message('生成几何覆盖与配准报告…')
+                    summary['quality'] = coverage_report(count,len(files),check)
                 if layered:
                     summary = save_layers(layer_files,result,reference_map,meta,format,summary,started,check)
                 else:

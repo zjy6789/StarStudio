@@ -51,6 +51,8 @@ footer { padding:5px; } progress { width:100%; height:8px; }
 .calibrationRow .muted { flex:1; min-width:50px; }
 #stackLinearTiffLabel { margin-top:10px; }
 #stackExecute { flex:1; width:auto; }
+#stackQualityRows { max-height:200px; overflow:auto; white-space:pre-wrap; margin:7px 0; }
+#stackCoveragePreview { width:100%; max-height:360px; object-fit:contain; background:#111; }
 .processTool { border:1px solid #505050; border-radius:4px; margin-top:7px; }
 .processToolHeader { display:flex; align-items:center; padding:4px 7px; }
 .processToolHeader button { flex:1; border:0; text-align:left; background:transparent; }

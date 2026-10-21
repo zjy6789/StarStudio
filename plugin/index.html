@@ -128,6 +128,14 @@
   <div id="stackFormatHint" class="hint">DNG 保留 32 位浮点；Photoshop 打开位深由 Camera Raw 设置决定。</div>
   <div id="stackCache" class="muted"></div>
   <div class="row"><button id="stackExecute" class="primary execute">执行堆栈并保存…</button><button id="stackCancel" disabled>取消</button></div>
+  <button id="stackQualityOptions" class="disclosure">配准与覆盖报告 ▾</button>
+  <div id="stackQualitySettings" class="collapsed">
+    <div id="stackQualitySummary" class="hint">堆栈完成后查看逐帧配准与覆盖情况；不会自动丢帧或裁剪。</div>
+    <div id="stackQualityRows" class="muted"></div>
+    <img id="stackCoveragePreview" alt="几何覆盖与建议裁剪框">
+    <div id="stackCoverageHint" class="hint"></div>
+    <button id="stackCoverageSave" disabled>导出完整覆盖计数图…</button>
+  </div>
 </section>
 <script src="main.js"></script>
 </body></html>

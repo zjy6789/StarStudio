@@ -4,7 +4,7 @@ const $=id=>document.getElementById(id);
 const extensions=['arw','cr2','cr3','nef','nrw','raf','orf','rw2','pef','srw','dng','raw','tif','tiff','png','jpg','jpeg'];
 
 function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
-  let selection=null, strokes=[], drawing=null, activeJob=null;
+  let selection=null, strokes=[], drawing=null, activeJob=null, quality=null;
   const calibration={dark:[],flat:[],bias:[],darkflat:[]};
   const modes=['mean','median','sigma','maximum','minimum'], formats=['dng','tiff16','tiff32','fits16','fits32'];
   for(const id of ['stackMode','stackScene']) $(id).selectedIndex=0;
@@ -12,12 +12,45 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
   function updateActions(busy=false) {
     $('stackExecute').disabled=busy || !selection;
     $('stackCancel').disabled=!activeJob;
+    $('stackCoverageSave').disabled=busy || !quality;
     for(const id of ['stackFiles','stackFolder','stackMode','stackScene','stackFormat','stackLinearTiff','stackReferenceGround']) $(id).disabled=busy;
     for(const kind of Object.keys(calibration)) {
       const prefix='stack'+kind[0].toUpperCase()+kind.slice(1);
       for(const action of ['Files','Folder','Clear']) $(prefix+action).disabled=busy || (action==='Clear' && !calibration[kind].length);
     }
   }
+  function clearQuality() {
+    quality=null;
+    $('stackQualitySummary').textContent='堆栈完成后查看逐帧配准与覆盖情况；不会自动丢帧或裁剪。';
+    $('stackQualityRows').textContent='';$('stackCoverageHint').textContent='';
+    $('stackCoveragePreview').removeAttribute('src');updateActions(true);
+  }
+  function showQuality(result) {
+    quality=result.quality || null;
+    $('stackQualitySummary').textContent='基准：'+result.reference+'；基准帧RMS=0只表示自身对齐，不代表最佳质量。';
+    $('stackQualityRows').textContent=(result.alignment || []).map(row=>row.file.split(/[\\/]/).pop()+
+      ' · '+row.matches+' 匹配 · RMS '+row.rms.toFixed(3)+' 像素').join('\n');
+    if(!quality) {
+      $('stackCoverageHint').textContent='当前组件没有返回完整覆盖报告；已保存的堆栈不受影响，请更新后台组件。';return;
+    }
+    $('stackCoveragePreview').src=quality.preview;
+    const crop=quality.crop;
+    $('stackCoverageHint').textContent='几何覆盖 '+quality.minimum+'–'+quality.maximum+' / '+quality.frames+' 帧；全部帧共同覆盖 '+
+      (100*quality.fullPixels/quality.totalPixels).toFixed(1)+'%。亮度表示覆盖比例，青框为共同覆盖裁剪建议。'+
+      (crop?'范围 ['+crop.left+', '+crop.top+') 至 ['+crop.right+', '+crop.bottom+')，'+(crop.right-crop.left)+' × '+(crop.bottom-crop.top)+' 像素；尚未裁剪。':'没有全部帧共同覆盖的矩形，不建议自动裁剪。')+
+      ' 此计数在Sigma剔除之前累计，不是信噪比或剔除后的样本数。母版保持完整尺寸。';
+  }
+  $('stackQualityOptions').addEventListener('click',()=>{
+    $('stackQualitySettings').classList.toggle('expanded');
+    $('stackQualityOptions').textContent='配准与覆盖报告 '+($('stackQualitySettings').classList.contains('expanded')?'▴':'▾');
+  });
+  $('stackCoverageSave').addEventListener('click',()=>run(async()=>{
+    if(!quality)throw new Error('请先完成堆栈并生成覆盖报告。');
+    const file=await fs.getFileForSaving('StarStudio_coverage.png',{types:['png']});if(!file)return;
+    const bytes=Uint8Array.from(atob(quality.png.split(',')[1]),c=>c.charCodeAt(0));
+    await file.write(bytes.buffer,{format:require('uxp').storage.formats.binary});
+    status('已导出完整16位覆盖计数图（每个像素为覆盖帧数）：'+file.nativePath+'；照片母版未修改。');
+  }));
   function calibrationHint() {
     const count=Object.values(calibration).reduce((n,paths)=>n+paths.length,0);
     $('stackCalibrationOptions').textContent='校准场（'+(count?count+' 张':'可选')+'） '+($('stackCalibrationSettings').classList.contains('expanded')?'▴':'▾');
@@ -84,6 +117,7 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
     const paths=entries.filter(e=>e.isFile && extensions.includes(e.name.split('.').pop().toLowerCase())).map(e=>e.nativePath);
     if(paths.length<2) throw new Error('请选择至少两张支持的照片；文件夹只读取当前层级。');
     selection=await job({op:'stackInspect',paths});
+    clearQuality();
     strokes=[];overlay();
     $('stackReference').src=selection.preview;
     $('stackSummary').textContent=selection.paths.length+' 张 · '+selection.width+' × '+selection.height+' · 基准：第 '+(selection.reference+1)+' 张 '+selection.name;
@@ -149,7 +183,8 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
       const temporary=await fs.getTemporaryFolder();
       opening=await temporary.createFile('StarStudio_stack_'+Date.now()+'.tif',{overwrite:false});
     }
-      result=await job({op:'stack',paths:selection.paths,mode:modes[$('stackMode').selectedIndex],
+      clearQuality();
+      result=await job({op:'stack',paths:selection.paths,mode:modes[$('stackMode').selectedIndex],qualityReport:true,
         landscape:$('stackScene').selectedIndex===1,mask:strokes,format,output:file.nativePath,
         calibration:{...calibration,linearTiff:$('stackLinearTiff').checked},
         photoshopOutput:opening.nativePath,...(layered?{referenceGround:true}:{})},id=>{activeJob=id;updateActions(true);});
@@ -161,6 +196,7 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
       }
       throw error;
     } finally {activeJob=null;updateActions(true);}
+    showQuality(result);
     if(layered && (!result.layers || result.layers.depth!==32 || result.layers.referenceResampled!==false))
       throw new Error('主文件可能已保存于 '+folder.nativePath+'；分层输出记录不完整，请重新打开面板并确认使用新版后台组件。');
     onSaved(layered?opening:file,layered?'tiff32':format);
