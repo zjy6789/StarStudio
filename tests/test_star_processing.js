@@ -477,3 +477,67 @@ test('execution rechecks background after processing and releases its unused res
   assert.equal(h.calls.outputs.length,0);assert.equal(h.images.has('finished'),false);
   assert.equal(h.images.has('input1'),true);assert.ok(h.calls.deleted.includes('finished'));
 });
+
+test('leaving the processing page while starting the service skips uploads until returning',async()=>{
+  let page='process';const gate=deferred();
+  const h=processingHarness({currentPage:()=>page,ensureService:()=>gate.promise});
+  await h.enableGlow();page='stack';h.ui.pageChanged();gate.resolve();await h.flush();
+  assert.equal(h.calls.uploads.length,0);assert.equal(h.calls.jobs.length,0);
+  page='process';h.ui.pageChanged();await h.tick(180);
+  assert.equal(h.calls.uploads.length,1);assert.equal(h.calls.jobs.length,1);
+  h.finish('job1');await h.tick(150);
+  assert.match(h.elements.get('processPreviewHint').textContent,/已更新/);
+});
+
+test('a full layer upload finishing after page exit stays reusable without starting obsolete work',async()=>{
+  let page='process';const h=processingHarness({currentPage:()=>page}),gate=deferred(),upload=h.host.upload;
+  h.host.upload=async(...args)=>{const result=await upload(...args);await gate.promise;return result;};
+  await h.enableGlow();page='stack';h.ui.pageChanged();gate.resolve();await h.flush();
+  assert.equal(h.calls.jobs.length,0);assert.equal(h.images.has('input1'),true);
+  assert.deepEqual(h.calls.deleted,[]);
+  page='process';h.ui.pageChanged();await h.tick(180);
+  assert.equal(h.calls.uploads.length,1);assert.equal(h.calls.jobs[0].request.image,'input1');
+  h.finish('job1');await h.tick(150);assert.deepEqual(h.calls.unsafeDeletes,[]);
+});
+
+test('a task id arriving after page exit is canceled without reporting progress on another page',async()=>{
+  let page='process';const h=processingHarness({currentPage:()=>page}),gate=deferred();
+  h.createGate=gate;h.cancelDelayed=true;await h.enableGlow();
+  page='stack';h.ui.pageChanged();const statusCount=h.calls.status.length;
+  gate.resolve();await h.flush();
+  assert.equal(h.jobs.get('job1').cancel,true);
+  assert.equal(h.calls.status.length,statusCount);assert.equal(h.images.has('input1'),true);
+  assert.equal(h.calls.jobs.length,1);
+  h.finish('job1','canceled');await h.tick(150);await h.tick(180);
+  assert.equal(h.calls.jobs.length,1);assert.deepEqual(h.calls.unsafeDeletes,[]);
+  page='process';h.ui.pageChanged();await h.tick(180);
+  assert.equal(h.calls.jobs.length,2);assert.equal(h.calls.uploads.length,1);
+  h.finish('job2');await h.tick(150);
+});
+
+test('a task completing before page-exit cancellation is discarded and returning restarts automatically',async()=>{
+  let page='process';const h=processingHarness({currentPage:()=>page}),gate=deferred();
+  h.pollGate=gate;await h.enableGlow();h.finish('job1');
+  page='stack';h.ui.pageChanged();const displayed=h.calls.native.length,statusCount=h.calls.status.length;
+  gate.resolve();await h.flush();await h.tick(180);
+  assert.equal(h.images.has('resultjob1'),false);assert.equal(h.images.has('input1'),true);
+  assert.equal(h.calls.native.length,displayed);assert.equal(h.calls.status.length,statusCount);
+  page='process';h.ui.pageChanged();await h.tick(180);
+  assert.equal(h.calls.jobs.length,2);assert.equal(h.calls.uploads.length,1);
+  h.finish('job2');await h.tick(150);
+  assert.match(h.elements.get('processPreviewHint').textContent,/已更新/);
+});
+
+test('an old processing error arriving after page exit does not overwrite another tool status',async()=>{
+  let page='process';const h=processingHarness({currentPage:()=>page}),gate=deferred();
+  h.pollGate=gate;await h.enableGlow();
+  page='stack';h.ui.pageChanged();
+  h.jobs.get('job1').state='error';h.jobs.get('job1').error='Old page failure';
+  const statusCount=h.calls.status.length;
+  gate.resolve();await h.flush();
+  assert.equal(h.calls.status.length,statusCount);assert.deepEqual(h.calls.unsafeDeletes,[]);
+  page='process';h.ui.pageChanged();h.emit('process_glow_strength_range','input',2);await h.tick(180);
+  assert.equal(h.calls.jobs.length,2);assert.equal(h.calls.uploads.length,1);
+  h.finish('job2');await h.tick(150);
+  assert.match(h.elements.get('processPreviewHint').textContent,/已更新/);
+});

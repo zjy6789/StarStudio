@@ -205,21 +205,21 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
   }
   async function process(request,key) {
     const created=await api('/jobs',request);jobID=created.id;
-    if(paused || selectionError || desired?.key!==key) cancel();
+    if(paused || selectionError || currentPage()!=='process' || desired?.key!==key) cancel();
     try {
       while(true) {
         const state=await api('/jobs/'+created.id);
         if(state.state==='done') return state.result;
         if(state.state==='canceled') return null;
         if(state.state==='error') throw new Error(state.error);
-        if(!paused && !selectionError && desired) {report(state.progress);status(state.message || '正在更新全分辨率预览…');}
+        if(!paused && !selectionError && currentPage()==='process' && desired) {report(state.progress);status(state.message || '正在更新全分辨率预览…');}
         await new Promise(resolve=>setTimeout(resolve,150));
       }
     } finally {jobID=null;}
   }
   function startWorker() {
     if(worker || paused || selectionError || isBusy()) return;
-    worker=render().catch(e=>{failedKey=runningKey;if(!selectionError && desired?.key===runningKey) {status(e.message || String(e),true);previewHint();}}).finally(()=>{
+    worker=render().catch(e=>{failedKey=runningKey;if(!selectionError && currentPage()==='process' && desired?.key===runningKey) {status(e.message || String(e),true);previewHint();}}).finally(()=>{
       worker=null;
       if(!paused && !selectionError && currentPage()==='process' && desired?.enabled && last?.key!==desired.key && desired.key!==failedKey) timer=setTimeout(startWorker,180);
     });
@@ -231,17 +231,17 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
       if(!target.enabled) {await clearImages();return;}
       if(last?.key===target.key) return;
       await ensureService();
-      if(paused || selectionError || desired?.key!==target.key) continue;
+      if(paused || selectionError || currentPage()!=='process' || desired?.key!==target.key) continue;
       if(meta?.sourceKey!==target.info.sourceKey) {
         await clearImages();
         status('正在读取完整星点图层…');
         meta=await native(()=>host.core.executeAsModal(()=>host.upload(target.doc,target.layer,api,report),{commandName:'读取完整星点图层'}));
         meta.sourceKey=target.info.sourceKey;
       }
-      if(paused || selectionError || desired?.key!==target.key) continue;
+      if(paused || selectionError || currentPage()!=='process' || desired?.key!==target.key) continue;
       const result=await process({op:'processStars',image:meta.id,settings:target.options,preview:false,scale:1,starEncoding:target.info.starEncoding},target.key);
       if(!result) continue;
-      if(paused || selectionError || desired?.key!==target.key) {await remove(result.image);continue;}
+      if(paused || selectionError || currentPage()!=='process' || desired?.key!==target.key) {await remove(result.image);continue;}
       const previous=last;
       last={key:target.key,sourceKey:target.info.sourceKey,result};
       await compose();await remove(previous?.result.image);

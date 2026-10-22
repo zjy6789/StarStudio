@@ -8,7 +8,7 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前开发分支源码为 **0.24.2 开发中**，星点加工可中途停止过期任务，减少新预览排队；保留图层误选恢复、原线性TIFF母版保留零点提亮、引擎文件检查、数据错误提示、基础/高级混合分层及窄栏布局候选。仍只配置一个StarNet程序路径，CPU兼容版可继续选择。窄栏候选尚待PS验证，最小宽度继续660px。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
+> 当前开发分支源码为 **0.24.3 开发中**，离开星点加工页时停止过期任务，返回后自动恢复预览；保留图层误选恢复、原线性TIFF母版保留零点提亮、引擎文件检查、数据错误提示、基础/高级混合分层及窄栏布局候选。仍只配置一个StarNet程序路径，CPU兼容版可继续选择。窄栏候选尚待PS验证，最小宽度继续660px。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
 
 > 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 
