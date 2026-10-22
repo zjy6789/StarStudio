@@ -234,8 +234,13 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
       if(paused || selectionError || currentPage()!=='process' || desired?.key!==target.key) continue;
       if(meta?.sourceKey!==target.info.sourceKey) {
         await clearImages();
+        if(paused || selectionError || currentPage()!=='process' || desired?.key!==target.key) continue;
         status('正在读取完整星点图层…');
-        meta=await native(()=>host.core.executeAsModal(()=>host.upload(target.doc,target.layer,api,report),{commandName:'读取完整星点图层'}));
+        meta=await native(()=>host.core.executeAsModal(()=>{
+          if(paused || selectionError || currentPage()!=='process' || desired?.key!==target.key) return null;
+          return host.upload(target.doc,target.layer,api,report);
+        },{commandName:'读取完整星点图层'}));
+        if(!meta) continue;
         meta.sourceKey=target.info.sourceKey;
       }
       if(paused || selectionError || currentPage()!=='process' || desired?.key!==target.key) continue;

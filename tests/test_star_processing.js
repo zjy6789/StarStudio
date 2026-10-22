@@ -541,3 +541,32 @@ test('an old processing error arriving after page exit does not overwrite anothe
   h.finish('job2');await h.tick(150);
   assert.match(h.elements.get('processPreviewHint').textContent,/已更新/);
 });
+
+test('page exit while old native readers finish skips the next source upload',async()=>{
+  let page='process';const h=processingHarness({currentPage:()=>page}),gate=deferred(),native=h.host.canvasStarPreview;
+  await h.enableGlow();h.finish('job1');await h.tick(150);
+  h.host.canvasStarPreview=async(...args)=>{
+    await gate.promise;
+    if(!args.at(-1)()){const error=new Error('Superseded');error.stale=true;throw error;}
+    return native(...args);
+  };
+  h.emit('processBackground','change',13);await h.flush();
+  h.emit('processSource','change',12);await h.tick(180);
+  page='stack';h.ui.pageChanged();gate.resolve();await h.flush();
+  assert.equal(h.calls.uploads.length,1);assert.equal(h.calls.jobs.length,1);
+  assert.deepEqual(h.calls.deleted,['resultjob1','input1']);assert.deepEqual(h.calls.unsafeDeletes,[]);
+  page='process';h.ui.pageChanged();await h.tick(180);
+  assert.equal(h.calls.uploads.length,2);assert.equal(h.calls.uploads[1].layerID,12);
+  h.finish('job2');await h.tick(150);
+});
+
+test('an upload waiting to enter the modal callback checks the page before reading pixels',async()=>{
+  let page='process';const h=processingHarness({currentPage:()=>page}),gate=deferred();
+  h.host.core.executeAsModal=async action=>{await gate.promise;return action({});};
+  await h.enableGlow();page='stack';h.ui.pageChanged();gate.resolve();await h.flush();
+  assert.equal(h.calls.uploads.length,0);assert.equal(h.calls.jobs.length,0);
+  page='process';h.ui.pageChanged();await h.tick(180);
+  assert.equal(h.calls.uploads.length,1);assert.equal(h.calls.jobs.length,1);
+  h.finish('job1');await h.tick(150);
+  assert.match(h.elements.get('processPreviewHint').textContent,/已更新/);
+});
