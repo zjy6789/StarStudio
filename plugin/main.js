@@ -318,10 +318,11 @@ async function job(request, started=()=>{}) {
     report(state.progress);
     if (state.state==='error') {
       const error=new Error(state.error);
+      error.jobState=state.state;
       if(state.failedFile){error.failedFile=state.failedFile;error.alignment=state.alignment || [];}
       throw error;
     }
-    if (state.state==='canceled') throw new Error('处理已取消。');
+    if (state.state==='canceled') throw Object.assign(new Error('处理已取消。'),{jobState:state.state});
     if (state.state==='done') return state.result;
     status(state.state==='queued'?'等待本地处理…':(state.message || '本地处理…')+' '+Math.round(state.progress*100)+'%');
     await new Promise(resolve=>setTimeout(resolve, 700));
@@ -362,7 +363,17 @@ async function extract() {
   const mode=meta.size===32 || value('decomposition')===1?'add':'screen';
   const preserveModelBackground=$('preserveModelBackground').checked;
   const starEncoding=meta.size===32?'signed':'gray';
-  const result=await job({op:'extract',image:meta.id,executable:modelExecutable(),license_sha256:modelInfo.license_sha256,stride,mode,preserveModelBackground,starEncoding});
+  let result;
+  try {
+    result=await job({op:'extract',image:meta.id,executable:modelExecutable(),license_sha256:modelInfo.license_sha256,stride,mode,preserveModelBackground,starEncoding});
+  } catch(error) {
+    // A lost HTTP reply does not prove that the worker stopped using this input.
+    if(error.jobState==='error' || error.jobState==='canceled') {
+      try {await api('/images/'+meta.id,undefined,false,'DELETE');}
+      catch(cleanup) {console.error('释放分离缓存失败',cleanup);}
+    }
+    throw error;
+  }
   const writeStarted=Date.now();
   status('写回背景和星点图层…');
   let bg,stars;
