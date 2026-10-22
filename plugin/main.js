@@ -260,7 +260,7 @@ function showPage(page) {
   syncLayers();
   if(page==='stack') status('选择一批照片或文件夹；无需在 Photoshop 中打开素材。');
   if(page==='prepare') status('选择未拉伸的 Star Studio 32位线性TIFF母版，先检查范围，再创建独立副本。');
-  if(page==='stretch') status('选择T4准备副本，建议参数后仅预览；保存并应用是独立操作。');
+  if(page==='stretch') status('选择原线性TIFF母版或T4副本，建议参数后仅预览；保存并应用是独立操作。');
   if(page==='process') status('选择星点图层和可选背景，自动在 Photoshop 中预览。');
   if(page==='background') status('选择已显影照片或无星背景，生成建议并检查主体保护。');
   processUI?.pageChanged();

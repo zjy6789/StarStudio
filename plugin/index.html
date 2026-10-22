@@ -13,10 +13,10 @@
 </div>
 <div class="tabs" role="tablist"><button id="stackTab" class="tab selected" role="tab" aria-selected="true">堆栈</button><button id="prepareTab" class="tab" role="tab" aria-selected="false">母版准备</button><button id="stretchTab" class="tab" role="tab" aria-selected="false">线性提亮</button><button id="backgroundTab" class="tab" role="tab" aria-selected="false">背景校正</button><button id="separateTab" class="tab" role="tab" aria-selected="false">星点分离</button><button id="processTab" class="tab" role="tab" aria-selected="false">星点加工</button></div>
 <section id="stretchPage" class="page" role="tabpanel">
-  <div class="row"><button id="stretchChoose">选择准备副本…</button><button id="stretchUseLast">使用刚准备副本</button></div>
-  <div class="hint">仅接收“母版准备”原样生成的32位线性ProPhoto TIFF，读取磁盘文件；PS尚未保存的编辑不会带入。已显影照片可跳过此页。</div>
+  <div class="row"><button id="stretchChoose">选择线性TIFF…</button><button id="stretchUseLast">使用刚准备副本</button></div>
+  <div class="hint">接收Star Studio原导出的32位线性ProPhoto TIFF母版（保留零点），或“母版准备”的原样副本。读取磁盘文件；PS未保存编辑不会带入。已显影照片可跳过。</div>
   <div id="stretchSummary" class="hint"></div>
-  <label class="processCompare"><input id="stretchConfirmed" type="checkbox"> 我确认该准备副本仍未拉伸</label>
+  <label class="processCompare"><input id="stretchConfirmed" type="checkbox"> 我确认所选文件仍未拉伸</label>
   <button id="stretchLoad">读取并建议参数</button>
   <div class="row"><label>提亮程度</label><input id="stretch_amount" type="number" min="0" max="10" step="0.1"></div>
   <input id="stretch_amountRange" type="range" min="0" max="10" step="0.1">
@@ -30,7 +30,7 @@
   <div id="stretchFeedback" class="hint"></div><div id="stretchState" class="hint"></div>
   <button id="stretchAdvancedOptions" class="disclosure">曲线与精度信息 ▾</button>
   <div id="stretchAdvanced" class="collapsed"><div id="stretchMath" class="hint"></div><div id="stretchRounding" class="hint"></div></div>
-  <div class="hint">预览在PS临时标签页全分辨率显示，原母版和准备副本不变。检查后再显式保存并应用；新增黑白端点时禁止应用。32位曲线仍有舍入，原母版不能删除。</div>
+  <div class="hint">预览在PS临时标签页全分辨率显示，原文件不变。检查后再显式保存并应用；原母版路径不裁切负值/HDR，非零变零时停止；T4路径新增黑白端点时禁止应用。32位曲线仍有舍入，原母版不能删除。</div>
   <div class="row"><button id="stretchExecute" class="primary execute">保存并应用拉伸…</button><button id="stretchCancel" disabled>取消</button></div>
   <div id="stretchSaved" class="hint"></div>
 </section>

@@ -14,16 +14,17 @@ function panel() {
     getTemporaryFolder:async()=>({nativePath:'C:\\UXPTemp',createFolder:async name=>{const folder={nativePath:'C:\\UXPTemp\\'+name,entries:[],getEntries:async()=>folder.entries,delete:async()=>{if(folder.entries.length)throw new Error('Delete on non-empty folder not allowed');calls.deleted.push(folder.nativePath);}};h.temporaryFolder=folder;return folder;}})};
   const photoshop={action:{batchPlay:async()=>{host.app.activeDocument=h.alreadyOpen?user:doc(200);return [{}];}}};
   const info={image:'input',path:selected.nativePath,width:320,height:256,profile:'Star Studio Linear ProPhoto RGB',minimum:0,maximum:1,provenance:{mapping:{offset:-.125,scale:4}},suggestion:{amount:4,protection:.75,background:.8},suggestionReason:'Conservative suggestion'};
+  h.info=info;
   const context={module:{exports:{}},document:{getElementById:get},console,Date,Set,require:name=>name==='./host.js'?host:name==='uxp'?{storage:{localFileSystem:storage}}:photoshop};
   vm.runInNewContext(fs.readFileSync('plugin/protected-stretch.js','utf8'),context);
   h.ui=context.module.exports.setup({isBusy:()=>h.busy,api:async(...args)=>{calls.api.push(args);return {};},report(){},status:(...args)=>calls.status.push(args),
     run:async action=>{if(h.busy)return;h.busy=true;try{return await action();}finally{h.busy=false;h.ui.updateActions();}},
     onSource:d=>calls.source.push(d.id),onApplied:(d,nonlinear)=>calls.onApplied.push({id:d.id,nonlinear,active:host.app.activeDocument.id}),
     job:async(request,started)=>{calls.jobs.push({...request});started('job');if(h.gate)await h.gate;
-      if(request.op==='stretchInspect')return info;
+      if(request.op==='stretchInspect')return h.info;
       if(h.changed)throw new Error('准备副本已变化');
       if(request.op==='stretchCheck')return {ok:true};
-      if(request.op==='stretchRender'){h.lastAmount=request.settings.amount;return {image:'render'+calls.jobs.length,curve:{sp:.001,hp:.475},stats:{newBlackChannels:0,newWhiteChannels:h.clip?1:0,nearWhitePixels:4,maxStorageError:1e-8}};}
+      if(request.op==='stretchRender'){h.lastAmount=request.settings.amount;return {image:'render'+calls.jobs.length,curve:{sp:.001,hp:.475},stats:{newBlackChannels:0,newWhiteChannels:h.clip?1:0,nearWhitePixels:4,maxStorageError:1e-8,negativeChannels:743,aboveOneChannels:3385,minimum:-.39,maximum:1.82}};}
       if(h.saveFailure)throw h.saveFailure;
       return {path:h.output.nativePath,metadata:{nonlinearStretch:h.lastAmount>0}};
     }});
@@ -111,4 +112,32 @@ test('cancel is available during backend work and its UI recovers afterward',asy
   const h=panel();await h.choose();let release;h.gate=new Promise(r=>{release=r;});const pending=h.load();await new Promise(setImmediate);
   assert.equal(h.get('stretchCancel').disabled,false);await h.emit('stretchCancel');assert.ok(h.calls.api.some(c=>c[0]==='/jobs/job'&&c[3]==='DELETE'));
   h.gate=null;release();await pending;assert.equal(h.get('stretchCancel').disabled,true);
+});
+
+test('original masters use the same explicit picker and show signed HDR without promising legacy compatibility',async()=>{
+  const h=panel();h.info={...h.info,inputKind:'linear-master',minimum:-.25,maximum:2.075};delete h.info.provenance;
+  h.file={...h.file,name:'original.tif',nativePath:'D:\\fixtures\\original.tif'};
+  await h.choose();assert.equal(h.get('stretchLoad').disabled,true);assert.equal(h.calls.jobs.length,0);
+  await h.load();assert.equal(h.calls.jobs[0].path,h.file.nativePath);
+  assert.match(h.get('stretchSummary').textContent,/原线性母版.*保留零点.*未执行范围映射/);
+  assert.match(h.get('stretchSummary').textContent,/现有去星和背景工具不接收/);
+  assert.equal(h.calls.preview.length,0);await h.preview();
+  assert.match(h.get('stretchFeedback').textContent,/负值 743.*超1 3385.*未裁切/);
+  assert.match(h.get('stretchMath').textContent,/RGB绝对峰值/);
+  assert.equal(h.get('stretchExecute').disabled,false);await h.execute();
+  assert.equal(h.calls.onApplied[0].nonlinear,true);assert.equal(h.calls.applied[0].meta.size,32);
+});
+
+test('switching a master to a prepared copy discards the signed result and restores the legacy explanation',async()=>{
+  const h=panel(),preparedInfo=h.info;
+  h.info={...preparedInfo,inputKind:'linear-master'};delete h.info.provenance;
+  await h.choose();await h.load();await h.preview();const oldKey=h.calls.preview.at(-1).key;
+  h.info=preparedInfo;await h.choose();
+  assert.equal(h.get('stretchConfirmed').checked,false);assert.equal(h.get('stretchExecute').disabled,true);
+  assert.ok(h.calls.api.some(c=>c[0]==='/images/'+oldKey&&c[3]==='DELETE'));
+  assert.equal(h.get('stretchFeedback').textContent,'');await h.load();
+  assert.match(h.get('stretchSummary').textContent,/T4准备副本.*原映射/);
+  assert.ok(!h.get('stretchSummary').textContent.includes('保留零点'));
+  await h.preview();assert.match(h.get('stretchFeedback').textContent,/新增黑端点/);
+  assert.ok(!h.get('stretchMath').textContent.includes('绝对峰值'));
 });

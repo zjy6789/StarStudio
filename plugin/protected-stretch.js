@@ -42,7 +42,7 @@ function setup({run,api,job,status,report,isBusy,onSource=()=>{},onApplied=()=>{
   function choose(file) {
     selected=file;$('stretchConfirmed').checked=false;
     for(const id of ['stretchFeedback','stretchMath','stretchRounding'])$(id).textContent='';
-    $('stretchSummary').textContent=file?file.name+' · 确认仍未拉伸后，读取并建议参数。':'选择母版准备生成的原样TIFF副本。';
+    $('stretchSummary').textContent=file?file.name+' · 确认仍未拉伸后，读取并建议参数。':'选择Star Studio原导出的32位线性TIFF母版，或母版准备生成的原样副本。';
     $('stretchState').textContent='尚未应用拉伸；原文件始终保留。';
   }
   async function task(request) {return job(request,id=>{jobID=id;updateActions(true);}).finally(()=>{jobID=null;});}
@@ -51,10 +51,10 @@ function setup({run,api,job,status,report,isBusy,onSource=()=>{},onApplied=()=>{
     const current=host.app.documents.find(d=>d.id===sourceID);
     if(meta && current) {
       if(current.width!==info.width || current.height!==info.height || current.bitsPerChannel!==host.constants.BitsPerChannelType.THIRTYTWO || current.mode!==host.constants.DocumentMode.RGB || current.colorProfileName!==info.profile)
-        throw new Error('临时输入文档的尺寸或颜色已改变，请重新读取准备副本。');
+        throw new Error('临时输入文档的尺寸或颜色已改变，请重新读取线性输入文件。');
       return;
     }
-    if(!info || !selected)throw new Error('请先读取范围准备副本。');
+    if(!info || !selected)throw new Error('请先读取线性输入文件。');
     await dropTemporary();
     const parent=await fs.getTemporaryFolder();temporaryRoot=parent.nativePath;
     temporary=await parent.createFolder('starstudio-stretch-'+Date.now());
@@ -80,28 +80,29 @@ function setup({run,api,job,status,report,isBusy,onSource=()=>{},onApplied=()=>{
     }
   }
   async function load() {
-    if(!selected || !$('stretchConfirmed').checked)throw new Error('请选择T4副本，并确认它仍未拉伸。');
+    if(!selected || !$('stretchConfirmed').checked)throw new Error('请选择线性母版或T4副本，并确认它仍未拉伸。');
     await clear();
     for(const id of ['stretchFeedback','stretchMath','stretchRounding'])$(id).textContent='';
     $('stretchState').textContent='正在读取线性副本；尚未应用。';
     try {
       info=await task({op:'stretchInspect',path:selected.nativePath,confirmedLinear:true});
       setSettings(info.suggestion);
-      $('stretchSummary').textContent=selected.name+' · '+info.width+' × '+info.height+' · '+info.profile+'\n范围 '+info.minimum+' 至 '+info.maximum+'；原映射 '+JSON.stringify(info.provenance.mapping)+'\n'+info.suggestionReason;
+      const source=info.inputKind==='linear-master'?'原线性母版：保留零点和完整浮点范围，未执行范围映射。输出若含负值或超1高光，现有去星和背景工具不接收。':'T4准备副本；原映射 '+JSON.stringify(info.provenance.mapping)+'。提亮保持的是准备副本的颜色比例。';
+      $('stretchSummary').textContent=selected.name+' · '+info.width+' × '+info.height+' · '+info.profile+'\n范围 '+info.minimum+' 至 '+info.maximum+'\n'+source+'\n'+info.suggestionReason;
       $('stretchState').textContent='已读取线性快照并建议参数，尚未打开提亮预览，也未应用。';
       status('建议已生成；点击「仅查看提亮」检查，再显式保存并应用。');
     }catch(error){await clear();$('stretchState').textContent='读取失败，未创建当前快照；请核对输入后重新读取。';throw error;}
   }
   async function rendered() {
-    if(!info)throw new Error('请先读取线性准备副本。');
+    if(!info)throw new Error('请先读取线性输入文件。');
     const key=currentKey();
     if(result && resultKey===key){await task({op:'stretchCheck',image:info.image});return result;}
     const next=await task({op:'stretchRender',image:info.image,settings:settings()});
     if(key!==currentKey()){await remove(next.image);throw new Error('参数已变化；请重新预览当前设置。');}
     const previous=result;result=next;resultKey=key;await remove(previous?.image);
     const p=next.curve,s=next.stats;
-    $('stretchFeedback').textContent='新增黑端点 '+s.newBlackChannels+' / 白端点 '+s.newWhiteChannels+' 个通道；近饱和 '+s.nearWhitePixels+' 像素。'+(s.newBlackChannels || s.newWhiteChannels?'暂不能应用，请降低提亮或增加亮星保护。':'');
-    $('stretchMath').textContent='RGB峰值联动modified asinh · SP '+p.sp.toPrecision(5)+' · HP '+p.hp.toPrecision(5)+'；LP/BP固定0。';
+    $('stretchFeedback').textContent=info.inputKind==='linear-master'?'保留零点；负值 '+s.negativeChannels+' / 超1 '+s.aboveOneChannels+' 个通道，未裁切。实际范围 '+s.minimum+' 至 '+s.maximum+'；新增零通道 '+s.newBlackChannels+'。':'新增黑端点 '+s.newBlackChannels+' / 白端点 '+s.newWhiteChannels+' 个通道；近饱和 '+s.nearWhitePixels+' 像素。'+(s.newBlackChannels || s.newWhiteChannels?'暂不能应用，请降低提亮或增加亮星保护。':'');
+    $('stretchMath').textContent=(info.inputKind==='linear-master'?'RGB绝对峰值':'RGB峰值')+'联动modified asinh · SP '+p.sp.toPrecision(5)+' · HP '+p.hp.toPrecision(5)+'；LP/BP固定0。';
     $('stretchRounding').textContent='32位存储最大舍入误差 '+s.maxStorageError.toExponential(3)+'；未新增端点不等于无损。';
     return result;
   }

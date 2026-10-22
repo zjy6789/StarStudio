@@ -8,7 +8,7 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前开发分支源码为 **0.23.0 开发中**，包含引擎文件检查、明确的数据错误提示、基础/高级混合分层及窄栏布局候选。仍只配置一个StarNet程序路径，CPU兼容版可继续选择。窄栏候选尚待PS验证，最小宽度继续660px。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
+> 当前开发分支源码为 **0.24.0 开发中**，新增直接从原线性TIFF母版提亮并保留零点的路径；包含引擎文件检查、数据错误提示、基础/高级混合分层及窄栏布局候选。仍只配置一个StarNet程序路径，CPU兼容版可继续选择。窄栏候选尚待PS验证，最小宽度继续660px。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
 
 > 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 
@@ -30,21 +30,21 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 
 无需安装 Python 或 CUDA，即可使用堆栈、曲线、星点缩小、辉光、饱和度和图层混合预览。**星点分离需要另装 StarNet++ CLI；彗差减少需要另装 Siril 1.4.x**。两个外部引擎独立配置，不影响其余功能。
 
-## 堆栈准备副本仍很暗时
+## 线性堆栈仍很暗时（开发功能）
 
-1. 保留原母版，在“母版准备”创建32位范围准备副本；进入 **线性提亮**，显式点击“使用刚准备副本”，或选择已有的原样T4副本。
-2. 确认副本仍未拉伸，点击“读取并建议参数”。这一步只建立快照和建议，不会自动修改照片或应用曲线。
+1. 保留原母版，进入 **线性提亮 → 选择线性TIFF…**，选择Star Studio原导出的32位线性ProPhoto TIFF。此路径保留零点和完整浮点范围；也可继续显式使用原样T4准备副本或“使用刚准备副本”。
+2. 确认所选文件仍未拉伸，点击“读取并建议参数”。核对来源与范围提示；这一步只建立快照和建议，不会自动修改照片或应用曲线。
 3. 点击 **仅查看提亮**，在PS临时标签页完整分辨率查看。调整提亮程度、亮星保护和背景亮度；可比较原线性输入，所有调整从同一磁盘快照重算。PS尚未保存的编辑不带入。
-4. 检查端点和舍入反馈后，点击 **保存并应用拉伸…**。结果另存为32位TIFF，并在独立PS文档中创建结果层和保留的原输入，一次撤销可恢复副本原输入。零强度仍标记线性。
+4. 检查实际范围和舍入反馈后，点击 **保存并应用拉伸…**。另存32位TIFF；PS结果层/原输入及撤销沿用原路径，新完整范围入口的原生显示和写回待用户手动验证。零强度仍标记线性。
 
-本页采用RGB联动modified asinh，仅支持本插件T4原样生成的线性ProPhoto RGB float32 TIFF，不自动重拉已显影照片或T6输出。合法负值/HDR原母版应先走T4范围准备，不能靠裁切塞入。出现新增黑白端点时会禁止应用，需降低强度或增加保护。没有新增端点仍不代表无损，原母版不能删除；T4零点抬升造成的颜色比例变化也不能由本页恢复。[完整输入、数学与回退约定](docs/PROTECTED_STRETCH.md)
+只支持上述明确来源的线性ProPhoto RGB float32 TIFF，不自动重拉已显影照片或拉伸输出。原母版路径使用RGB绝对峰值的共同正增益，不裁切负值或超1高光；非零变零时停止。**完整范围输出若仍含负值或超1，不能直接用于现有0..1去星和背景工具。** 原T4路径依旧拒绝新增黑白端点。两条路径都有float32舍入，原母版不能删除；保色是明确空间下的比例约定，不是无损或自动颜色校准。[新路径与验证](docs/ZERO_PRESERVING_STRETCH.md) · [原T6约定](docs/PROTECTED_STRETCH.md)
 
 ## 已有单张FITS堆栈时（开发功能）
 
 1. 在 **母版准备 → 导入一张FITS堆栈** 选择文件；灰度可以直接检查，三平面RGB须先确认来源软件使用的线性ProPhoto或线性sRGB空间，再点击 **检查数据**。
 2. 核对范围与舍入报告，确认尚未拉伸；发生float32舍入时需另行接受。不能确认颜色空间、相机原生RGB或未去拜耳素材，请先在来源天文软件中处理。
 3. 保存独立32位线性TIFF，可选择保存后打开。原FITS保留，负值和超1高光不裁切；灰度复制为中性RGB。此步没有拉伸或范围映射。
-4. 需要本插件提亮时，点击 **使用刚保存的32位母版**，先创建范围准备副本，再进入线性提亮。不要删除原FITS或把交接副本误认为已显影照片。
+4. 需要本插件提亮时，可在 **线性提亮 → 选择线性TIFF…** 选择刚保存的32位母版以保留零点；原“使用刚保存的32位母版”范围准备路径继续保留。不要删除原FITS或把交接副本误认为已显影照片。
 
 只支持一幅灰度或三平面RGB，不做FITS序列管理。遇到空值、压缩或其他布局会解释原因；不会自动填零、旋转或裁剪。头卡片、来源哈希归档到TIFF描述，WCS仅存档。[数据与验证边界](docs/FITS_IMPORT.md)
 
