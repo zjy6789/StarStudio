@@ -46,8 +46,10 @@ function setup({run,api,job,status,report,selectedLayer,isBusy,stage,onApplied=(
       model=await task({op:'denoiseFit',image:meta.id,scope:whole?'starless':'selection',target:whole?undefined:target,confirmedStarless:whole});validate();
       $('denoiseSamples').src=model.samplingPreview;$('denoiseSummary').textContent='绿色框为 '+model.patches+' 处背景参考块。若落在星云、地景或纹理上，请修改范围。'+(!model.sigma?' 未估计到高频背景噪声，默认原样输出。':'')+(model.backgroundSigma>3*model.sigma?' 参考块有较多低频变化，默认保留；仅在确认是背景色噪时使用高级相关模式。':'');
       $('denoiseEstimate').textContent='高频估计σ '+model.sigma.toPrecision(5)+'；局部平面残差σ '+(model.backgroundSigma??model.sigma).toPrecision(5)+'。后者可能包含真实结构，不是精确传感器测噪。';
-      $('denoiseView').selectedIndex=0;await show();status('背景降噪预览已准备；先检查暗弱细节，再确认创建副本。');
     }catch(error){await clearModel();throw error;}
+    // A render can refuse a numerical range even though the fitted snapshot is
+    // valid. Keep its reference blocks available for an explicit parameter retry.
+    $('denoiseView').selectedIndex=0;await show();status('背景降噪预览已准备；先检查暗弱细节，再确认创建副本。');
   }
   async function capture(){
     const {doc,layer}=current(),before=key(doc,layer);

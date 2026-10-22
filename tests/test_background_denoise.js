@@ -15,7 +15,7 @@ function panel(){
   vm.runInNewContext(fs.readFileSync('plugin/background-denoise.js','utf8'),context);
   h.ui=context.module.exports.setup({api:async(...args)=>{calls.requests.push(args);return {};},report(){},selectedLayer:()=>({doc:h.doc,layer:h.layer}),isBusy:()=>h.busy,stage:()=>h.stage,isUpdatingPickers:()=>h.updating,status(){},onApplied:d=>{h.applied=d;},
     run:async fn=>{if(h.busy)return;h.busy=true;try{return await fn();}finally{h.busy=false;h.ui.updateActions();}},
-    job:async(request,onStart)=>{calls.jobs.push(JSON.parse(JSON.stringify(request)));onStart('job');if(h.gate)await h.gate;if(h.failure)throw h.failure;
+    job:async(request,onStart)=>{calls.jobs.push(JSON.parse(JSON.stringify(request)));onStart('job');if(h.gate)await h.gate;if(h.failure)throw h.failure;if(request.op==='denoiseRender'&&h.renderFailure)throw h.renderFailure;
       return request.op==='denoiseFit'?{sigma:h.sigma??.005,patches:5,samplingPreview:'data:patches'}:{image:'result'+calls.jobs.length,stats:{negativeChannels:1,aboveOneChannels:2}};}});
   h.emit=async(id,event='click')=>get(id).listeners[event]();h.capture=()=>h.emit('denoiseCapture');h.generate=()=>h.emit('denoiseGenerate');
   h.confirm=()=>{get('denoiseReviewed').checked=true;h.ui.updateActions();};return h;
@@ -64,4 +64,13 @@ test('correlated treatment is explicit and confirmation does not carry across so
   h.get('denoiseCorrelated').checked=true;await h.emit('denoiseCorrelated','change');await h.emit('denoisePreview');assert.equal(h.calls.jobs.at(-1).options.correlated,true);
   h.get('denoiseScope').selectedIndex=1;await h.emit('denoiseScope','change');assert.equal(h.get('denoiseCorrelated').checked,false);
   await h.generate();h.get('denoiseCorrelated').checked=true;await h.emit('backgroundSource','change');assert.equal(h.get('denoiseCorrelated').checked,false);
+});
+
+test('a refused first render retains valid reference blocks and supports an explicit parameter retry',async()=>{
+  const h=panel();await h.capture();h.renderFailure=new Error('numerical range refused');
+  await assert.rejects(h.generate(),/numerical range/);assert.equal(h.get('denoisePreview').disabled,false);
+  assert.equal(h.calls.requests.some(r=>r[0]==='/denoise-sources/source'&&r[3]==='DELETE'),false);
+  h.confirm();await assert.rejects(h.emit('denoiseExecute'),/确认/);
+  h.renderFailure=null;h.get('denoiseCorrelated').checked=true;await h.emit('denoiseCorrelated','change');await h.emit('denoisePreview');
+  assert.equal(h.calls.jobs.filter(j=>j.op==='denoiseFit').length,1);h.confirm();await h.emit('denoiseExecute');assert.equal(h.calls.applied.length,1);
 });
