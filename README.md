@@ -8,7 +8,7 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前开发分支源码为 **0.22.0 开发中**，包含引擎文件检查、明确的数据错误提示及窄栏布局候选。仍只配置一个StarNet程序路径，CPU兼容版可继续选择。窄栏候选尚待PS验证，最小宽度继续660px。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
+> 当前开发分支源码为 **0.23.0 开发中**，包含引擎文件检查、明确的数据错误提示、基础/高级混合分层及窄栏布局候选。仍只配置一个StarNet程序路径，CPU兼容版可继续选择。窄栏候选尚待PS验证，最小宽度继续660px。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
 
 > 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 
@@ -195,7 +195,7 @@ StarNet++ 只需配置一次。它是外部程序，本项目不随包分发；�
 
 手动选择星点图层，可再选择同一源文档中的背景图层。选择星点后自动在 Photoshop 新标签页打开全分辨率预览，无需点击预览按钮；选择背景后，可边调整星点边查看它覆盖背景的效果。
 
-0.7候选也可显式 **使用刚分离的结果**。本会话关联按图层ID记录，重命名不会丢失；删除或换文档后不会按相似名称猜测。**恢复匹配混合** 使用已记录或手动确认的关系；外来星点请展开 **手动指定分离关系**。灰底修正和32位负差值必须保留其编码，不能只因名字带 starmask 就当作黑底图层。
+当前开发版可显式 **使用刚分离的结果**。本会话关联按图层ID记录，重命名不会丢失；删除或换文档后不会按相似名称猜测。基础页面显示当前是否与分离关系匹配，**恢复匹配混合** 使用已记录或手动确认的关系；外来星点请展开 **高级混合与分离关系** 确认，也可在其中自定义混合模式。收起后仍显示自定义状态，不改变所选模式。灰底修正和32位负差值必须保留其编码，不能只因名字带 starmask 就当作黑底图层。[分层边界](docs/MATCHED_BLEND.md)
 
 混合模式使用 Photoshop 原生的 **正常、变亮、滤色、颜色减淡、线性减淡（添加）、浅色**。可用模式以当前文档位深和 Photoshop 支持为准；不会为了使用某种模式自动降低文档位深。滤色分离通常搭配滤色，相加分离搭配线性减淡（添加）；其他模式适合按需要调整外观。
 

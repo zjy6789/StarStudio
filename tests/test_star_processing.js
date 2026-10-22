@@ -49,7 +49,7 @@ function deferred() {
   return {promise,resolve};
 }
 
-function processingHarness() {
+function processingHarness(setupOverrides={}) {
   const elements=new Map(),timers=new Map(),calls={uploads:[],jobs:[],native:[],deleted:[],unsafeDeletes:[],outputs:[],status:[]};
   const values={processSource:null,processBackground:null,processBlend:'screen'};
   const jobs=new Map(),images=new Set();
@@ -126,7 +126,7 @@ function processingHarness() {
     run:async action=>{
       busy=true;for(const el of elements.values())el.disabled=true;
       try{await ui.pause();await action();}finally{busy=false;for(const el of elements.values())el.disabled=false;ui.updateActions();ui.resume();}
-    }};
+    },...setupOverrides};
   ui=context.module.exports.setup(options);harness.ui=ui;
   harness.emit=(id,event,value)=>{if(value!==undefined){if(id in values)values[id]=value;else document.getElementById(id).value=value;}return document.getElementById(id).listeners[event]?.();};
   harness.flush=async()=>{await new Promise(setImmediate);};
@@ -265,6 +265,15 @@ test('delayed duplicate picker changes do not cancel an unchanged pending native
   h.emit('processSource','change',11);h.emit('processBlend','change','screen');h.emit('processBackground','change',null);await h.flush();
   gate.resolve();await h.flush();
   assert.equal(callbacks,1);assert.equal(h.calls.native.length,1);assert.equal(h.ui.previewDocumentID(),90);assert.equal(h.calls.status.some(x=>x.error),false);
+});
+
+test('changing advanced blend still refreshes its summary and native preview without recomputing pixels',async()=>{
+  const seen=[];
+  const h=processingHarness({refreshBlendModes:()=>seen.push(h.values.processBlend)});
+  h.emit('processSource','change',11);await h.flush();
+  h.emit('processBlend','change','lighten');await h.flush();
+  assert.equal(seen.at(-1),'lighten');assert.equal(h.calls.native.at(-1).blend,'lighten');
+  assert.equal(h.values.processSource,11);assert.equal(h.calls.jobs.length,0);assert.equal(h.calls.uploads.length,0);
 });
 
 test('executing before the changed-settings preview completes adopts the actual final result in the preview cache',async()=>{

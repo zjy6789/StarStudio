@@ -383,11 +383,15 @@ for(const [size,preserve,add,blend,encoding] of [[16,false,false,'screen','black
     await h.emit('useSeparation');
     assert.equal(h.processOptions.value('processSource'),stars.id);assert.equal(h.processOptions.value('processBackground'),background.id);
     assert.equal(h.processOptions.value('processBlend'),blend);assert.equal(h.processOptions.starEncoding(h.doc,stars),encoding);
+    assert.match(h.get('processBlendHint').textContent,/与分离关系匹配/);
     assert.equal(h.get('processPage').classList.contains('active'),true);
     if(size===32)assert.equal(h.jobRequest.mode,'add');
     if(encoding==='gray')stars.blendMode='screen'; // Known encoding is independent of a user-changed blend mode.
     assert.equal(h.processOptions.starEncoding(h.doc,stars),encoding);
-    h.get('processBlend').selectedIndex=0;await h.emit('restoreMatchedBlend');assert.equal(h.processOptions.value('processBlend'),blend);
+    h.get('processBlend').selectedIndex=0;h.processOptions.refreshBlendModes();
+    assert.match(h.get('processBlendHint').textContent,encoding==='gray'?/与分离关系匹配/:/当前自定义混合.*正常.*关系匹配模式/);
+    await h.emit('restoreMatchedBlend');assert.equal(h.processOptions.value('processBlend'),blend);
+    assert.match(h.get('processBlendHint').textContent,/与分离关系匹配/);
     h.processOptions.useActive('processSource');await h.tick(800);
     assert.equal(h.processOptions.value('processSource'),11,'Synchronization must preserve a manual source choice');
     h.doc.layers=h.doc.layers.filter(layer=>layer.id!==background.id);h.doc.activeHistoryState.id++;await h.tick(800);
@@ -401,9 +405,11 @@ for(const [size,preserve,add,blend,encoding] of [[16,false,false,'screen','black
 test('manual relation restores its blend and encoding without pretending an unknown 32-bit Screen pair is valid',async()=>{
   const h=panel();await h.settle();h.processOptions.useActive('processSource');
   h.processOptions.refreshBlendModes();
+  assert.match(h.get('processBlendHint').textContent,/当前混合.*分离关系未知/);
   await h.emit('restoreMatchedBlend');assert.match(h.get('status').textContent,/分离关系未知.*确认/);
   h.get('processRelation').selectedIndex=2;await h.emit('processRelation','change');
   assert.equal(h.processOptions.value('processBlend'),'linearDodge');
+  assert.match(h.get('processBlendHint').textContent,/与分离关系匹配.*线性减淡/);
   h.get('processRelation').selectedIndex=3;await h.emit('processRelation','change');
   assert.equal(h.processOptions.value('processBlend'),'linearLight');assert.equal(h.processOptions.starEncoding(h.doc,h.doc.layers[0]),'gray');
   h.doc.bitsPerChannel=32;h.doc.activeHistoryState.id++;await h.tick(800);
@@ -411,4 +417,34 @@ test('manual relation restores its blend and encoding without pretending an unkn
   assert.match(h.get('status').textContent,/32 位不提供滤色/);assert.equal(h.doc.bitsPerChannel,32);
   h.get('processRelation').selectedIndex=2;await h.emit('processRelation','change');
   assert.equal(h.processOptions.value('processBlend'),'linearDodge');
+});
+
+test('advanced blend disclosure preserves all selections and does not trigger image work',async()=>{
+  const h=panel();await h.settle();h.doc.layers.push({id:12,name:'Background'});h.doc.activeHistoryState.id++;await h.tick(800);
+  h.processOptions.useActive('processSource');h.processOptions.refreshBlendModes();h.get('processBackground').selectedIndex=2;
+  h.get('processRelation').selectedIndex=2;await h.emit('processRelation','change');
+  h.get('processBlend').selectedIndex=0;h.processOptions.refreshBlendModes();
+  assert.match(h.get('processBlendHint').textContent,/当前自定义混合.*正常.*线性减淡/);
+  const before={source:h.processOptions.value('processSource'),background:h.processOptions.value('processBackground'),
+    mode:h.processOptions.value('processBlend'),relation:h.get('processRelation').selectedIndex,requests:h.calls.requests.length,pages:h.calls.pages};
+  assert.equal(h.get('processRelationSettings').classList.contains('expanded'),false);
+  for(const opened of [true,false]) {
+    await h.emit('processRelationOptions');
+    assert.equal(h.get('processRelationSettings').classList.contains('expanded'),opened);
+    assert.equal(h.get('processRelationOptions').attributes.get('aria-expanded'),String(opened));
+    assert.deepEqual({source:h.processOptions.value('processSource'),background:h.processOptions.value('processBackground'),
+      mode:h.processOptions.value('processBlend'),relation:h.get('processRelation').selectedIndex,requests:h.calls.requests.length,pages:h.calls.pages},before);
+  }
+  assert.equal(h.calls.uploads,0);assert.match(h.get('processBlendHint').textContent,/当前自定义混合/);
+});
+
+test('blend summary does not retain a confirmed relation after deleting the source or closing documents',async()=>{
+  const h=panel();await h.settle();h.processOptions.useActive('processSource');h.processOptions.refreshBlendModes();
+  h.get('processRelation').selectedIndex=2;await h.emit('processRelation','change');
+  assert.match(h.get('processBlendHint').textContent,/与分离关系匹配/);
+  h.doc.layers=[];h.doc.activeLayers=[];h.doc.activeHistoryState.id++;await h.tick(800);
+  assert.match(h.get('processBlendHint').textContent,/请选择星点图层/);
+  assert.equal(h.processOptions.value('processSource'),null);
+  h.host.app.documents=[];h.host.app.activeDocument=null;await h.tick(800);
+  assert.match(h.get('processBlendHint').textContent,/请选择星点图层/);
 });

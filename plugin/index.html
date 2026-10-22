@@ -150,9 +150,9 @@
   <div id="processPairHint" class="hint">手动选择星点与可选背景；快捷操作只使用本会话记录的图层 ID。</div>
   <label>星点图层</label><div class="row"><sp-picker id="processSource" placeholder="选择星点图层"><sp-menu></sp-menu></sp-picker><button id="processUseActive">用当前图层</button></div>
   <label>背景图层（可选）</label><div class="row"><sp-picker id="processBackground" placeholder="不使用背景图层"><sp-menu></sp-menu></sp-picker><button id="processBackgroundUseActive">用当前图层</button></div>
-  <label>星点混合模式</label><sp-picker id="processBlend"><sp-menu></sp-menu></sp-picker>
-  <button id="processRelationOptions" class="disclosure">手动指定分离关系 ▾</button>
-  <div id="processRelationSettings" class="collapsed"><label>分离关系</label><sp-picker id="processRelation"><sp-menu><sp-menu-item>按本会话记录；外来图层手动确认</sp-menu-item><sp-menu-item>滤色星点（黑底）</sp-menu-item><sp-menu-item>相加星点（黑底 / 浮点差值）</sp-menu-item><sp-menu-item>灰底修正星点（8/16 位线性光）</sp-menu-item></sp-menu></sp-picker></div>
+  <div id="processBlendHint" class="hint">请选择星点图层；匹配混合依据本会话记录或手动确认的分离关系。</div>
+  <button id="processRelationOptions" class="disclosure" aria-expanded="false" aria-controls="processRelationSettings">高级混合与分离关系 ▾</button>
+  <div id="processRelationSettings" class="collapsed"><label>自定义星点混合模式</label><sp-picker id="processBlend"><sp-menu></sp-menu></sp-picker><label>分离关系（外来星点请手动确认）</label><sp-picker id="processRelation"><sp-menu><sp-menu-item>按本会话记录；外来图层手动确认</sp-menu-item><sp-menu-item>滤色星点（黑底）</sp-menu-item><sp-menu-item>相加星点（黑底 / 浮点差值）</sp-menu-item><sp-menu-item>灰底修正星点（8/16 位线性光）</sp-menu-item></sp-menu></sp-picker></div>
   <div id="processEncodingHint" class="hint"></div>
   <div class="hint">选择图层后自动在 Photoshop 新标签页中显示全分辨率预览。加工后创建新的星点图层并保留所选混合模式。</div>
   <div class="hint">选背景时创建独立合成组。输入及本会话关联的旧结果保留在不透明度为 0 的分组中，避免重复叠星并支持一次撤销；原层不合并。未选背景只输出星点。其他图层保留，透明区域仍可见下方内容。</div>

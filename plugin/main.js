@@ -160,11 +160,17 @@ function refreshBlendModes(doc,restore=false) {
   if(restore || key!==blendSourceKey) selected=relation.known?relation.mode:source?.blendMode===host.constants.BlendMode.LINEARDODGE?'linearDodge':relation.mode;
   blendSourceKey=key;
   choose('processBlend',modes.map(mode=>({label:labels[mode],value:mode})),modes.includes(selected)?selected:modes.includes('screen')?'screen':encoding==='gray'?'linearLight':'linearDodge');
+  const current=value('processBlend');
+  $('processBlendHint').textContent=!source
+    ? '请选择星点图层；匹配混合依据本会话记录或手动确认的分离关系。'
+    : !relation.known?'当前混合：'+labels[current]+'；分离关系未知，请在高级选项中手动确认。'
+    : current===relation.mode?'与分离关系匹配：'+labels[current]+'。'
+    : '当前自定义混合：'+labels[current]+'；关系匹配模式：'+labels[relation.mode]+'。可恢复匹配混合。';
   $('processBlend').disabled=busy || encoding==='gray';
   $('processEncodingHint').textContent=encoding==='gray'
     ? '灰底修正星点使用线性光。加工只调整正星点，负差值保留；请保留来源图层的线性光模式。'
     : encoding==='signed'?'32 位浮点保留负差值；修正星点建议使用线性减淡（添加）。':'';
-  $('processPairHint').textContent=source?(relation.known?'已确认分离关系；可恢复匹配混合。':'外来星点来源关系未知；可在「分离关系」指定滤色、相加或灰底修正。')+' 仍可手动选择其他星点和背景。':'手动选择星点与可选背景，或显式使用刚分离的结果。';
+  $('processPairHint').textContent=source?(relation.known?'已确认分离关系；可恢复匹配混合。':'外来星点来源关系未知；可在高级选项中指定滤色、相加或灰底修正。')+' 仍可手动选择其他星点和背景。':'手动选择星点与可选背景，或显式使用刚分离的结果。';
 }
 function snapshot() {
   if (!host.app.documents.some(d=>!isPreview(d.id))) return null;
@@ -204,6 +210,7 @@ function syncLayers() {
       docID=null; layerList=[];
       for (const id of ['source','processSource','processBackground','backgroundSource','residualOriginal','residualModel']) choose(id,[],null);
       $('documentName').textContent='未打开照片'; if(!['stack','prepare','stretch'].includes(currentPage)) status('请先打开一张照片。');
+      $('processBlendHint').textContent='请选择星点图层；匹配混合依据本会话记录或手动确认的分离关系。';
       if(processUI) processUI.sync(next,old);
       if(backgroundUI) backgroundUI.sync(next,old);
       if(maskUI) maskUI.sync(next,old);
@@ -388,13 +395,18 @@ async function extract() {
 for (const id of ['decomposition','stride']) $(id).selectedIndex=0;
 $('photoStage').selectedIndex=0;$('photoScene').selectedIndex=0;
 $('processRelation').selectedIndex=0;
-$('processRelationOptions').addEventListener('click',()=>$('processRelationSettings').classList.toggle('expanded'));
+$('processRelationOptions').addEventListener('click',()=>{
+  const opened=!$('processRelationSettings').classList.contains('expanded');
+  $('processRelationSettings').classList.toggle('expanded',opened);
+  $('processRelationOptions').setAttribute('aria-expanded',String(opened));
+  $('processRelationOptions').textContent='高级混合与分离关系 '+(opened?'▴':'▾');
+});
 $('useSeparation').addEventListener('click',()=>run(useSeparation));
 $('useLastSeparation').addEventListener('click',()=>run(useSeparation));
 $('restoreMatchedBlend').addEventListener('click',()=>{
   try {
     const {doc,layer}=selectedLayer('processSource');
-    if(!starRelation(doc,layer).known) throw new Error('此图层的分离关系未知，请先展开「手动指定分离关系」确认。');
+    if(!starRelation(doc,layer).known) throw new Error('此图层的分离关系未知，请展开「高级混合与分离关系」，手动确认来源。');
     refreshBlendModes(doc,true);processUI.pageChanged();
   } catch(e) {status(e.message,true);}
 });
