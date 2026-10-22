@@ -105,6 +105,37 @@ def test_invalid_contracts_rejected():
     with pytest.raises(ValueError): validate_image(np.ones((2,3,3))*1.1)
 
 
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), -float('inf')])
+def test_nonfinite_input_explains_source_repair_without_range_preparation(value):
+    image = np.full((2, 3, 4), .3, dtype=np.float32)
+    image[0, 1, 2] = value
+    before = image.copy()
+    with pytest.raises(ValueError, match='NaN 或 Inf.*返回生成此图的软件.*范围准备不能修复'):
+        validate_image(image)
+    np.testing.assert_array_equal(image.view('u4'), before.view('u4'))
+
+
+@pytest.mark.parametrize('value', [-.125, 1.25, np.nextafter(np.float32(0), np.float32(-1)),
+                                   np.nextafter(np.float32(1), np.float32(2))])
+def test_finite_hdr_input_explains_preserving_master_and_explicit_preparation(value):
+    image = np.full((2, 3, 4), .3, dtype=np.float32)
+    image[0, 1, 2] = value
+    before = image.copy()
+    with pytest.raises(ValueError, match='0..1.*有限.*保留原图/母版.*母版准备.*其他来源') as error:
+        validate_image(image)
+    assert 'NaN' not in str(error.value)
+    np.testing.assert_array_equal(image.view('u4'), before.view('u4'))
+
+
+def test_valid_boundary_and_alpha_bits_remain_unchanged():
+    image = np.array([[[0., -0., 1., .2],
+                       [np.nextafter(np.float32(0), np.float32(1)),
+                        np.nextafter(np.float32(1), np.float32(0)), .7, 1.]]], dtype=np.float32)
+    before = image.copy()
+    validate_image(image)
+    np.testing.assert_array_equal(image.view('u4'), before.view('u4'))
+
+
 def test_rgb_blend_and_direct_clipping_have_distinct_color_results():
     a=np.array([[[.8,.1,.1]]],dtype=np.float32)
     blend=stretch(a,dict(lnD=4,clipping="blend"))

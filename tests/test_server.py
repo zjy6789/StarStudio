@@ -152,7 +152,7 @@ def test_starnet_http_endpoints_authenticate_before_inspecting_paths(tmp_path, m
         for path in ['starnet-info', 'starnet-discover']:
             for token in [None, 'incorrect-token']:
                 with pytest.raises(urllib.error.HTTPError) as error:
-                    post(path, b'{invalid', token)
+                    post(path, b'', token)
                 assert error.value.code == 403
                 assert json.load(error.value)['error']
         assert calls == []
@@ -162,6 +162,40 @@ def test_starnet_http_endpoints_authenticate_before_inspecting_paths(tmp_path, m
             assert json.load(response) == {'executable': None}
         assert calls == [('info', 'test-starnet2.exe'), ('discover', 'test-starnet++.exe')]
         assert server.store.jobs == {}
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+
+def test_ordinary_upload_distinguishes_nonfinite_and_finite_hdr_without_accepting_or_clipping(tmp_path):
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.token = 'test-token'
+    server.store = Store(tmp_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    def post(path, payload):
+        request = urllib.request.Request(f'http://127.0.0.1:{server.server_port}'+path,
+            data=payload, headers={'X-Star-Token': server.token})
+        return opener.open(request, timeout=3)
+    try:
+        for value in [float('nan'), float('inf'), -float('inf'), -.125, 1.25]:
+            with post('/images', b'{"width":2,"height":1,"components":3}') as response:
+                key = json.load(response)['id']
+            image = np.full((1, 2, 3), .3, dtype='<f4')
+            image[0, 1, 2] = value
+            with pytest.raises(urllib.error.HTTPError) as error:
+                post(f'/images/{key}?y=0&rows=1', image.tobytes())
+            assert error.value.code == 400
+            message = json.load(error.value)['error']
+            assert ('非有限值' in message) == (not np.isfinite(value))
+            assert ('保留原图/母版' in message) == bool(np.isfinite(value))
+            entry = server.store.images[key]
+            assert entry['ready'] is False and entry['rows'] == 0
+            np.testing.assert_array_equal(entry['data'], 0)
+            valid = np.array([[[0., .1, 1.], [.25, .5, .75]]], dtype='<f4')
+            with post(f'/images/{key}?y=0&rows=1', valid.tobytes()) as response:
+                assert json.load(response) == {'ready': True}
+            np.testing.assert_array_equal(server.store.get(key).view('u4'), valid.view('u4'))
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=3)
 

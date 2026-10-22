@@ -88,7 +88,7 @@ def test_sampling_masks_and_distribution_refuse_unsafe_extrapolation():
 @pytest.mark.parametrize('bad', [float('nan'), float('inf'), -.01, 1.01])
 def test_bad_pixels_remain_rejected(bad):
     image, _, _, _ = fixture();image[0,0,0] = bad
-    with pytest.raises(ValueError, match='0..1'):
+    with pytest.raises(ValueError, match='0..1' if np.isfinite(bad) else '非有限值'):
         fit_background(image)
 
 

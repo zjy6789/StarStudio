@@ -168,7 +168,7 @@ def test_invalid_pixels_do_not_get_clipped(bad, tmp_path):
     image[0,0,0] = bad
     tifffile.imwrite(path, image, photometric='rgb', metadata=None, description=description,
                      iccprofile=linear_profile(), software='Star Studio Linear Preparation')
-    with pytest.raises(ValueError, match='0..1'):
+    with pytest.raises(ValueError, match='0..1' if np.isfinite(bad) else '非有限值'):
         inspect_prepared(path, True)
 
 

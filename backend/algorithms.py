@@ -14,8 +14,11 @@ from .starnet_install import starnet_info
 def validate_image(image):
     if image.ndim != 3 or image.shape[2] not in (1, 2, 3, 4):
         raise ValueError("需要灰度、灰度+透明度、RGB 或 RGBA 像素")
-    if not np.isfinite(image).all() or image.min() < 0 or image.max() > 1:
-        raise ValueError("像素必须在 0..1 内；请先将 HDR 图像映射到普通范围")
+    if not np.isfinite(image).all():
+        raise ValueError("输入像素含 NaN 或 Inf（非有限值）；请返回生成此图的软件检查计算或导出，重新生成有效副本。范围准备不能修复非有限值。")
+    low, high = image.min(), image.max()
+    if low < 0 or high > 1:
+        raise ValueError(f"当前入口仅接受 0..1，检测到有限的范围外像素（{low:.6g}..{high:.6g}）。请保留原图/母版：支持的线性ProPhoto TIFF母版可在「母版准备」创建后期副本，再「线性提亮」；其他来源先在原软件创建合适的后期副本。")
 
 
 def color_count(image):
