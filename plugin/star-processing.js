@@ -271,7 +271,8 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
   $('processNatural').addEventListener('click',()=>preset('reduction'));
   $('processSoft').addEventListener('click',()=>preset('glow'));
   $('processExecute').addEventListener('click',()=>run(async()=>{
-    const target=selection(),blend=value('processBlend'),backdrop=background();
+    const target=selection(),blend=value('processBlend');
+    background();
     let output,result,temporary=false;
     try {
       if(target.enabled) {
@@ -283,6 +284,7 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
         result=last?.key===target.key?last.result:await job({op:'processStars',image:meta.id,settings:target.options,preview:false,scale:1,starEncoding:target.info.starEncoding});
         temporary=result!==last?.result;
       }
+      const backdrop=background();
       const family=related(target.doc,target.layer);
       const composition=await native(()=>host.applyStarResult({doc:target.doc,source:target.layer,background:backdrop?.layer,
         blend,result,meta,previous:family.records.map(record=>record.rootID)},api,report));

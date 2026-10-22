@@ -466,3 +466,14 @@ test('a result completing before cancellation is discarded when the background s
   h.emit('processBackground','change',12);await h.flush();await h.tick(180);
   assert.equal(h.calls.jobs.length,2);assert.equal(h.calls.uploads.length,1);
 });
+
+test('execution rechecks background after processing and releases its unused result if that layer disappeared',async()=>{
+  let h;
+  h=processingHarness({job:async()=>{
+    h.layers.delete(12);h.images.add('finished');return {image:'finished',curve:[0,1]};
+  }});
+  h.values.processSource=11;h.values.processBackground=12;h.elements.get('glowEnabled').checked=true;
+  await assert.rejects(h.emit('processExecute','click'),/No selected layer/);
+  assert.equal(h.calls.outputs.length,0);assert.equal(h.images.has('finished'),false);
+  assert.equal(h.images.has('input1'),true);assert.ok(h.calls.deleted.includes('finished'));
+});
