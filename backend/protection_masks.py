@@ -22,7 +22,7 @@ def make_mask(image, options, progress=lambda x: None, canceled=lambda: False):
     bits = options.get("bits", 32)
     low, high = float(options.get("low", .002)), float(options.get("high", .02))
     grow, feather = options.get("grow", 2), float(options.get("feather", 1))
-    if mode not in ("stars", "outside", "subject") or encoding not in ("black", "gray", "signed"):
+    if mode not in ("stars", "outside", "subject", "halos") or encoding not in ("black", "gray", "signed"):
         raise ValueError("未知蒙版任务或星点编码")
     if bits not in (8, 16, 32) or (encoding == "gray" and bits == 32):
         raise ValueError("灰底编码仅支持明确的8/16位来源")
@@ -32,6 +32,12 @@ def make_mask(image, options, progress=lambda x: None, canceled=lambda: False):
         raise ValueError("扩展需为0到64的整数；柔化需在0到64像素之间")
     if mode == "subject" and image.shape[2] != 1:
         raise ValueError("主体来源必须为单通道选区")
+    if mode == "halos":
+        from .halo_masks import halo_coverage
+        weights, extra = halo_coverage(image, options, lambda x: progress(.9*x), canceled)
+        mask, details = make_mask(weights, dict(mode="subject", grow=0, feather=0), lambda x: progress(.9+.1*x), canceled)
+        details.update(extra, mode=mode, encoding=encoding, bits=bits, low=low, high=high, grow=grow, feather=feather)
+        return mask, details
     def check():
         if canceled():
             raise InterruptedError("蒙版生成已取消")

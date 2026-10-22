@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);
 
 function setup({run,api,job,status,report,selectedLayer,workingDocument,starRelation,isBusy,isUpdatingPickers=()=>false}) {
   let source=null,result=null,renderKey=null,jobID=null;
-  function mode() {return ['stars','outside','subject'][$('maskMode').selectedIndex] || 'stars';}
+  function mode() {return ['stars','outside','subject','halos'][$('maskMode').selectedIndex] || 'stars';}
   function current() {
     if(mode()==='subject') return {doc:workingDocument(),layer:null,encoding:'black'};
     const selected=selectedLayer('processSource'),relation=starRelation(selected.doc,selected.layer);
@@ -13,7 +13,8 @@ function setup({run,api,job,status,report,selectedLayer,workingDocument,starRela
   function key({doc,layer,encoding}) {return [doc.id,layer?.id || 0,doc.width,doc.height,doc.bitsPerChannel,doc.activeHistoryState.id,encoding].join(':');}
   function options() {
     const encoding=mode()==='subject'?'black':current().encoding;
-    return {mode:mode(),encoding,bits:source?.size || 32,low:Number($('maskLow').value),high:Number($('maskHigh').value),grow:Number($('maskGrow').value),feather:Number($('maskFeather').value)};
+    return {mode:mode(),encoding,bits:source?.size || 32,low:Number($('maskLow').value),high:Number($('maskHigh').value),grow:Number($('maskGrow').value),feather:Number($('maskFeather').value),
+      ...(mode()==='halos'?{bright:Number($('maskHaloBright').value),radius:Number($('maskHaloRadius').value),core:Number($('maskHaloCore').value)}:{})};
   }
   async function remove(id,path='/images') {if(id)try{await api(path+'/'+id,undefined,false,'DELETE');}catch(e){console.error(e);}}
   async function clearResult() {
@@ -47,7 +48,7 @@ function setup({run,api,job,status,report,selectedLayer,workingDocument,starRela
     try {
       if(source.key!==key(current()) || requested!==JSON.stringify(options())) throw new Error('计算期间来源或参数变化，请重新生成。');
       result=next;renderKey=requested;$('maskPreview').src=next.preview;
-      $('maskSummary').textContent=next.width+' × '+next.height+' · 白区等效覆盖 '+(next.whiteCoverage*100).toFixed(2)+'% · '+next.corePixels+' 个接近完全覆盖的像素。';
+      $('maskSummary').textContent=next.width+' × '+next.height+' · 白区等效覆盖 '+(next.whiteCoverage*100).toFixed(2)+'% · '+next.corePixels+' 个接近完全覆盖的像素。'+(mode()==='halos'?'\n检测到 '+next.candidateStars+' 个紧致亮星；白区只是蓝紫候选。先排除真实蓝星与星云，再在PS用色相/饱和度或选择性色彩局部调整；本插件未修改颜色。':'');
       status('覆盖预览已生成；检查白区及反选设置后，再应用选区或保存蒙版。');
     } catch(error) {await remove(next.image);throw error;}
   }
@@ -62,7 +63,11 @@ function setup({run,api,job,status,report,selectedLayer,workingDocument,starRela
   }
   function hint() {
     const subject=mode()==='subject';
-    $('maskSourceHint').textContent=subject?'使用源照片的选区快照；改变选区后需再次点击读取。':'使用上方选择的星点原图层，按已确认关系解码；不包含本页尚未输出的加工效果。'+(mode()==='outside'?'星点外仍可能含星云、地景和残留，不是自动天空识别。':'白色代表星点覆盖。');
+    const halos=mode()==='halos';
+    $('maskHaloSettings').classList.toggle('collapsed',!halos);
+    $('maskLowLabel').textContent=halos?'相对色差起点':'星点起点';
+    $('maskHighLabel').textContent=halos?'相对色差完全覆盖':'完全覆盖';
+    $('maskSourceHint').textContent=subject?'使用源照片的选区快照；改变选区后需再次点击读取。':'使用上方选择的星点原图层，按已确认关系解码；不包含本页尚未输出的加工效果。'+(halos?'只找紧致亮星周围的蓝紫候选；需要RGB，不判断真实星色，也不自动修补。':mode()==='outside'?'星点外仍可能含星云、地景和残留，不是自动天空识别。':'白色代表星点覆盖。');
     $('maskApplyHint').textContent=$('maskInvert').checked?'应用时选择白区以外，以保护白区。':'应用时选择白色区域，后续编辑作用于白区。';
   }
   function updateActions(busy=isBusy()) {
@@ -70,6 +75,7 @@ function setup({run,api,job,status,report,selectedLayer,workingDocument,starRela
     try {current();available=true;validate();valid=true;}catch(e){}
     for(const id of ['maskGenerate','maskMode','maskGrow','maskFeather','maskInvert']) $(id).disabled=busy || (!available && id==='maskGenerate');
     for(const id of ['maskLow','maskHigh']) $(id).disabled=busy || mode()==='subject';
+    for(const id of ['maskHaloBright','maskHaloRadius','maskHaloCore']) $(id).disabled=busy;
     $('maskReadSelection').disabled=busy || mode()!=='subject' || !available;
     $('maskReviewed').disabled=busy || !valid;
     for(const id of ['maskApply','maskSave']) $(id).disabled=busy || !valid || !$('maskReviewed').checked;
@@ -94,11 +100,11 @@ function setup({run,api,job,status,report,selectedLayer,workingDocument,starRela
     status('已保存完整尺寸32位灰度覆盖蒙版：'+saved.path+'；白区与预览相同。');
   }));
   $('maskMode').addEventListener('change',()=>run(async()=>{
-    const subject=mode()==='subject';$('maskInvert').checked=mode()!=='outside';
+    const subject=mode()==='subject';$('maskInvert').checked=!['outside','halos'].includes(mode());
     $('maskGrow').value=subject?0:2;$('maskFeather').value=subject?0:1;
     if(source && (subject!==(source.path==='/images'))) await clear();else await clearResult();
   }));
-  for(const id of ['maskLow','maskHigh','maskGrow','maskFeather']) $(id).addEventListener('change',()=>run(clearResult));
+  for(const id of ['maskLow','maskHigh','maskGrow','maskFeather','maskHaloBright','maskHaloRadius','maskHaloCore']) $(id).addEventListener('change',()=>run(clearResult));
   for(const id of ['maskInvert','maskReviewed']) $(id).addEventListener('change',()=>{if(id==='maskInvert')$('maskReviewed').checked=false;updateActions();});
   for(const id of ['processSource','processRelation']) $(id).addEventListener('change',()=>{if(!isUpdatingPickers())return run(clear);});
   $('maskCancel').addEventListener('click',()=>{if(jobID)api('/jobs/'+jobID,undefined,false,'DELETE').catch(e=>status(e.message,true));});

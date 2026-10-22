@@ -98,3 +98,23 @@ test('cancel action targets only the current calculation, without changing sourc
   await h.emit('maskCancel');assert.ok(h.calls.deleted.includes('/jobs/job'));
   h.failure=new Error('已取消');release();await assert.rejects(pending,/已取消/);assert.equal(h.calls.applied.length,0);
 });
+
+test('halo candidates explicitly reuse the stellar snapshot, select white, and require coverage review',async()=>{
+  const h=panel();await h.generate();h.get('maskMode').selectedIndex=3;await h.emit('maskMode','change');
+  assert.equal(h.get('maskInvert').checked,false);assert.equal(h.calls.jobs.length,1);
+  assert.equal(h.get('maskLowLabel').textContent,'相对色差起点');
+  await h.generate();assert.equal(h.calls.uploads.length,2);
+  const opts=h.calls.jobs.at(-1).options;
+  assert.equal(opts.mode,'halos');assert.equal(opts.encoding,'gray');assert.equal(opts.radius,12);assert.equal(opts.core,3);assert.equal(opts.bright,.25);
+  await assert.rejects(h.emit('maskApply'),/检查/);
+  h.confirm();await h.emit('maskApply');assert.equal(h.calls.applied.at(-1).invert,false);
+  assert.match(h.get('maskSummary').textContent,/只是蓝紫候选/);
+});
+
+test('halo geometry changes or no-candidate failures invalidate previous approval',async()=>{
+  const h=panel();h.get('maskMode').selectedIndex=3;await h.emit('maskMode','change');await h.generate();h.confirm();
+  h.get('maskHaloCore').value=4;await h.emit('maskHaloCore','change');
+  assert.equal(h.get('maskApply').disabled,true);assert.equal(h.get('maskReviewed').checked,false);
+  h.failure=new Error('未找到候选');await assert.rejects(h.generate(),/未找到候选/);
+  assert.equal(h.calls.applied.length,0);assert.equal(h.get('maskApply').disabled,true);
+});

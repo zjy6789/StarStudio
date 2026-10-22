@@ -162,12 +162,17 @@
   <label class="processCompare"><input id="processOriginal" type="checkbox"> <span id="processCompareLabel">查看原星点</span></label>
   <div id="processPreviewHint" class="muted">可随时切换背景、星点和混合模式。大半径辉光或星形修复计算时保留上一帧预览。</div>
   <button id="processExecute" class="primary execute">执行星点加工</button>
-  <button id="maskOptions" class="disclosure">保护蒙版 ▾</button>
+  <button id="maskOptions" class="disclosure">蒙版与色晕候选 ▾</button>
   <div id="maskSettings" class="collapsed">
-    <label>覆盖来源</label><sp-picker id="maskMode"><sp-menu><sp-menu-item>星点覆盖</sp-menu-item><sp-menu-item>星点外区域</sp-menu-item><sp-menu-item>主体选区</sp-menu-item></sp-menu></sp-picker>
+    <label>覆盖来源</label><sp-picker id="maskMode"><sp-menu><sp-menu-item>星点覆盖</sp-menu-item><sp-menu-item>星点外区域</sp-menu-item><sp-menu-item>主体选区</sp-menu-item><sp-menu-item>蓝紫晕候选（RGB星点层）</sp-menu-item></sp-menu></sp-picker>
     <div id="maskSourceHint" class="hint"></div>
     <button id="maskReadSelection">读取主体选区</button>
-    <div class="row"><label>星点起点<input id="maskLow" type="number" min="0" max="1" step="0.0001" value="0.002"></label><label>完全覆盖<input id="maskHigh" type="number" min="0.0001" max="1" step="0.001" value="0.02"></label></div>
+    <div class="row"><label><span id="maskLowLabel">星点起点</span><input id="maskLow" type="number" min="0" max="1" step="0.0001" value="0.002"></label><label><span id="maskHighLabel">完全覆盖</span><input id="maskHigh" type="number" min="0.0001" max="1" step="0.001" value="0.02"></label></div>
+    <div id="maskHaloSettings" class="collapsed">
+      <label>亮星检测下限（相对本层峰值）<input id="maskHaloBright" type="number" min="0.001" max="1" step="0.01" value="0.25"></label>
+      <div class="row"><label>外圈半径（原图像素）<input id="maskHaloRadius" type="number" min="1" max="64" step="1" value="12"></label><label>核心保护半径（原图像素）<input id="maskHaloCore" type="number" min="0" max="63" step="1" value="3"></label></div>
+      <div class="hint">相对色差基于工作RGB，非测光或光学诊断。扩展与柔化后仍限制在核心以外、外圈以内；没有候选会停止，不生成空选区。</div>
+    </div>
     <div class="row"><label>扩展（像素）<input id="maskGrow" type="number" min="0" max="64" step="1" value="2"></label><label>外柔化（像素）<input id="maskFeather" type="number" min="0" max="64" step="0.5" value="1"></label></div>
     <div class="row"><button id="maskGenerate">生成覆盖预览</button><button id="maskCancel">取消计算</button></div>
     <img id="maskPreview" class="coveragePreview" alt="保护蒙版覆盖预览，白色为目标区域">

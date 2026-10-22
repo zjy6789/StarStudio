@@ -8,7 +8,7 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前开发分支源码为 **0.16.0 开发中**，新增单张线性FITS交接到32位TIFF，衔接既有母版准备。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
+> 当前开发分支源码为 **0.17.0 开发中**，新增蓝紫晕候选蒙版，供局部检查和手动调整；不自动修改照片颜色。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
 
 > 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 
@@ -54,6 +54,14 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 4. 也可保存完整尺寸 **32位灰度 TIFF**，供后续作为蒙版使用。导出白区与覆盖预览一致；反选只影响应用。已有文件不会被覆盖。
 
 主体参数重算使用已读取的稳定选区快照；要更换主体需再次读取。本功能无新增必装引擎，计算和文件验证见 [保护蒙版约定](docs/PROTECTION_MASKS.md)；PS选区精度、撤销与面板操作仍待用户手动验证。
+
+## 怀疑亮星周围有蓝紫晕时（开发功能）
+
+1. 在 **星点加工** 选择已确认分离关系的RGB星点层，打开 **蒙版与色晕候选**，选择 **蓝紫晕候选**。灰度不能判断颜色。
+2. 调整紧致亮星检测下限、核心保护与外圈半径；色差门槛控制覆盖权重。生成并检查白区，确认它没有包含真实蓝星、星云或地景。
+3. 确认覆盖后，选择 **应用选区** 或保存32位灰度蒙版，在Photoshop中继续编辑范围，并用色相/饱和度、选择性色彩或蒙版强度局部调整。
+
+本功能只辅助选区，照片像素不变；没有候选时会停止，避免空选区造成误操作。它不判断真实光学成因，不自动压紫、模糊、修补或再次去星。半径单位是原图像素，必须按实际星点检查。[方法与边界](docs/HALO_MASKS.md)
 
 ## 天空偏色或希望增强银河颜色时（开发功能）
 
