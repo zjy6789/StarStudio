@@ -33,6 +33,22 @@ def distribution(points):
     return design
 
 
+def robust_coefficients(design, target, canceled=lambda: False):
+    coefficients = []
+    for c in range(target.shape[1]):
+        check_cancel(canceled)
+        initial = np.linalg.lstsq(design, target[:, c], rcond=None)[0]
+        residual = design@initial-target[:, c]
+        scale = max(1e-7, float(np.median(np.abs(residual-np.median(residual)))*1.4826))
+        solution = least_squares(lambda a: design@a-target[:, c], initial,
+                                 jac=lambda a: design.copy(), loss="soft_l1", f_scale=scale,
+                                 max_nfev=100)
+        if not solution.success or not np.all(np.isfinite(solution.x)):
+            raise ValueError("背景模型未收敛；请调整背景取样或跳过校正。")
+        coefficients.append(solution.x)
+    return np.asarray(coefficients).T
+
+
 def fit_background(image, protection=None, sampling=None, progress=lambda x: None, canceled=lambda: False):
     validate_image(image)
     h, w, _ = image.shape
@@ -69,19 +85,7 @@ def fit_background(image, protection=None, sampling=None, progress=lambda x: Non
     points = np.asarray(points)
     design = distribution(points[accepted])
     target = values[accepted]
-    coefficients = []
-    for c in range(n):
-        check_cancel(canceled)
-        initial = np.linalg.lstsq(design, target[:, c], rcond=None)[0]
-        residual = design@initial-target[:, c]
-        scale = max(1e-7, float(np.median(np.abs(residual-np.median(residual)))*1.4826))
-        solution = least_squares(lambda a: design@a-target[:, c], initial,
-                                 jac=lambda a: design.copy(), loss="soft_l1", f_scale=scale,
-                                 max_nfev=100)
-        if not solution.success or not np.all(np.isfinite(solution.x)):
-            raise ValueError("背景模型未收敛；请调整背景取样或跳过校正。")
-        coefficients.append(solution.x)
-    coefficients = np.asarray(coefficients).T
+    coefficients = robust_coefficients(design, target, canceled)
     reference = np.median(design@coefficients, axis=0)
     check_cancel(canceled)
     # This thumbnail shows sampling only. Full-resolution model/result goes to PS.

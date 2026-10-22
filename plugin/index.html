@@ -77,6 +77,29 @@
       <div class="row"><button id="colorExecute">创建可调颜色副本</button><button id="colorCancel">取消计算</button></div>
       <div class="muted">原文档不改写。结果副本保留原输入，效果层可调整不透明度；原alpha与嵌入ICC保留，32位数值不硬裁切。</div>
     </div>
+    <button id="denoiseOptions" class="disclosure">背景降噪 ▾</button>
+    <div id="denoiseSettings" class="collapsed">
+      <div class="hint">使用上方选择的已显影照片或无星背景。默认只处理明确读取的背景选区；可先用保护蒙版选中星点外区域。原图与原alpha保留，不降低位深。</div>
+      <label>作用范围</label><sp-picker id="denoiseScope"><sp-menu><sp-menu-item>只处理已读取的背景选区</sp-menu-item><sp-menu-item>整层（我确认为无星背景）</sp-menu-item></sp-menu></sp-picker>
+      <button id="denoiseCapture">读取背景作用选区</button><div id="denoiseMaskHint" class="hint"></div>
+      <div class="row"><label>降噪强度<input id="denoiseStrength" type="number" min="0" max="1" step="0.05" value="0.5"></label><label>细节保护<input id="denoiseDetail" type="number" min="0" max="1" step="0.05" value="0.5"></label></div>
+      <button id="denoiseAdvancedOptions" class="disclosure">降噪类型与边界 ▾</button>
+      <div id="denoiseAdvanced" class="collapsed">
+        <sp-picker id="denoiseMode"><sp-menu><sp-menu-item>默认：RGB仅色噪／灰度亮度</sp-menu-item><sp-menu-item>联合亮度与色噪</sp-menu-item></sp-menu></sp-picker>
+        <label><input id="denoiseCorrelated" type="checkbox"> 确认参考块是平稳背景，处理相关噪声</label>
+        <div class="muted">相关模式使用去除局部平面后的残差估计；星云、梯度或纹理也会产生残差，开启前确认绿色参考块不含这些结构。</div>
+        <div class="muted">内建NLM按相似小块平均。细节保护越高，平均越弱；联合模式可能削弱暗弱结构，并不能恢复真实细节。无星不等于无地景，有地景时请使用背景选区。</div>
+        <div id="denoiseEstimate" class="muted"></div>
+      </div>
+      <button id="denoiseGenerate">读取并生成降噪预览</button>
+      <img id="denoiseSamples" class="coveragePreview" alt="背景噪声参考小块位置示意">
+      <div id="denoiseSummary" class="hint">先指定背景范围；展开工具不会自动处理。</div>
+      <div class="row"><sp-picker id="denoiseView"><sp-menu><sp-menu-item>降噪结果</sp-menu-item><sp-menu-item>原输入</sp-menu-item><sp-menu-item>允许处理范围</sp-menu-item></sp-menu></sp-picker><button id="denoisePreview">更新降噪预览</button></div>
+      <div id="denoisePreviewHint" class="hint">完整尺寸比较，保持相同显示条件。首次滤波可能较慢；调整强度复用已有结果。</div>
+      <label><input id="denoiseReviewed" type="checkbox"> 已比较背景、星点与暗弱细节，确认当前效果</label>
+      <div class="row"><button id="denoiseExecute">创建降噪副本</button><button id="denoiseCancel">取消计算</button></div>
+      <div class="muted">原文档不改写；32位副本保留原输入与可调效果层。不是蒙尘划痕修补，也不承诺去星彩圈修复。</div>
+    </div>
 </section>
 <section id="preparePage" class="page" role="tabpanel">
   <div class="row"><button id="prepareChoose">选择线性母版…</button><button id="prepareUseLast">使用刚保存的32位母版</button></div>

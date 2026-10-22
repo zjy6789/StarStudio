@@ -40,7 +40,7 @@ def archive(source, target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--tag', default='v0.14.0-beta.1')
+    parser.add_argument('--tag', default='v0.15.0-beta.1')
     parser.add_argument('--skip-freeze', action='store_true', help='Reuse an existing frozen runtime')
     args = parser.parse_args()
     if sys.platform != 'win32':
@@ -55,7 +55,7 @@ def main():
                         '--onedir', '--windowed', '--name', 'StarStudioBridge',
                         '--paths', str(ROOT), '--distpath', str(BUILD / 'frozen'),
                         '--workpath', str(BUILD / 'pyinstaller'), '--specpath', str(BUILD),
-                        '--collect-all', 'rawpy',
+                        '--collect-all', 'rawpy', '--hidden-import', 'pywt',
                         '--additional-hooks-dir', str(ROOT / 'tools/hooks'),
                         '--exclude-module', 'pytest', '--exclude-module', 'pip',
                         '--exclude-module', 'tkinter', '--exclude-module', 'matplotlib',

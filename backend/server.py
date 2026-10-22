@@ -34,12 +34,13 @@ class Store:
         self.stretch_sources, self.stretch_results = {}, {}
         self.protection_masks = {}
         self.color_models = {}
+        self.denoise_models = {}
 
-    def create(self, w, h, c, purpose="image"):
+    def create(self, w, h, c, purpose="image", *, dtype="<f4"):
         if not (0 < w <= 65536 and 0 < h <= 65536 and w*h <= 250_000_000 and c in (1, 2, 3, 4)):
             raise ValueError("无效图像尺寸")
         key = uuid.uuid4().hex
-        a = np.lib.format.open_memmap(self.path / f"{key}.npy", mode="w+", dtype="<f4", shape=(h, w, c))
+        a = np.lib.format.open_memmap(self.path / f"{key}.npy", mode="w+", dtype=dtype, shape=(h, w, c))
         self.images[key] = {"data": a, "rows": 0, "ready": False, "purpose": purpose}
         return key
 
@@ -73,6 +74,9 @@ class Store:
     def delete(self, key):
         self.protection_masks.pop(key, None)
         self.color_models.pop(key, None)
+        denoise = self.denoise_models.pop(key, None)
+        if denoise and denoise.get("candidate"):
+            self.delete(denoise["candidate"]["image"])
         self.background_models.pop(key, None)
         self.stretch_sources.pop(key, None)
         self.stretch_results.pop(key, None)
@@ -190,6 +194,65 @@ class Store:
                             except Exception:
                                 self.delete(output_id)
                                 raise
+                    elif operation in ("denoiseFit", "denoiseRender"):
+                        from .background_denoise import noise_model, filter_delta, mix_denoise
+                        from .star_processing import number
+                        image_id = request["image"]
+                        image = self.get(image_id, "denoise-source")
+                        canceled = lambda: job.get("cancel", False)
+                        if canceled():raise InterruptedError("背景降噪已取消")
+                        if operation == "denoiseFit":
+                            previous = self.denoise_models.pop(image_id, None)
+                            if previous and previous.get("candidate"):
+                                self.delete(previous["candidate"]["image"])
+                            scope, target = request.get("scope", "selection"), request.get("target")
+                            if scope == "selection" and not target:
+                                raise ValueError("请先读取背景作用选区")
+                            if scope not in ("selection", "starless") or (scope == "starless" and request.get("confirmedStarless") is not True):
+                                raise ValueError("整层处理需明确确认为无星背景")
+                            target = target if scope == "selection" else None
+                            job["message"] = "估计背景局部噪声…"
+                            model = noise_model(image, self.get(target) if target else None, progress, canceled)
+                            self.denoise_models[image_id] = dict(model=model, target=target)
+                            job["result"] = model
+                        else:
+                            if image_id not in self.denoise_models:
+                                raise ValueError("噪声模型已失效，请重新读取生成")
+                            entry = self.denoise_models[image_id];options = request["options"]
+                            detail = number(options, "detail", .5, 0, 1)
+                            strength = number(options, "strength", .5, 0, 1)
+                            correlated = options.get("correlated", False)
+                            if not isinstance(correlated, bool):raise ValueError("相关色噪选项必须为布尔值")
+                            model = dict(entry["model"], sigma=entry["model"]["backgroundSigma"] if correlated else entry["model"]["sigma"])
+                            if options.get("mode", "chroma") not in ("chroma", "joint") or (color_count(image) == 1 and options.get("mode", "chroma") != "joint"):
+                                raise ValueError("灰度请使用亮度降噪；RGB可选择仅色噪或联合模式")
+                            view = request.get("view", "result")
+                            target = self.get(entry["target"]) if entry["target"] else None
+                            cached = entry.get("candidate")
+                            reused = bool(cached and cached["detail"] == detail and cached["sigma"] == model["sigma"])
+                            computed = False
+                            if strength and model["sigma"] and view == "result" and not reused:
+                                job["message"] = "按背景小块计算NLM；取消在当前块完成后生效…"
+                                candidate_id = self.create(image.shape[1], image.shape[0], color_count(image), "denoise-delta", dtype="<f8")
+                                try:
+                                    candidate = self.images[candidate_id]
+                                    details = filter_delta(image, model, candidate["data"], detail, target, lambda x:progress(.85*x), canceled)
+                                    candidate["data"].flush();candidate.update(ready=True, rows=image.shape[0])
+                                    entry["candidate"] = dict(image=candidate_id, sigma=model["sigma"], **details)
+                                except Exception:
+                                    self.delete(candidate_id);raise
+                                if cached:self.delete(cached["image"])
+                                cached = entry["candidate"];computed = True
+                            job["message"] = "混合完整尺寸降噪预览…"
+                            output_id = self.create(image.shape[1], image.shape[0], image.shape[2])
+                            try:
+                                output = self.images[output_id]
+                                stats = mix_denoise(image, model, self.get(cached["image"], "denoise-delta") if cached else None,
+                                    output["data"], options, target, view, lambda x:progress(.85+.15*x if computed else x), canceled)
+                                output["data"].flush();output.update(ready=True, rows=image.shape[0])
+                                job["result"] = dict(image=output_id, stats=stats, filterReused=reused)
+                            except Exception:
+                                self.delete(output_id);raise
                     elif operation in ("colorFit", "colorRender"):
                         from .sky_color import fit_color, render_color
                         image_id = request["image"]
@@ -311,7 +374,7 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                if operation in ("colorFit", "colorRender", "maskGenerate", "maskSave", "stackCrop", "processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchRender", "stretchSave") and job.get("cancel"):
+                if operation in ("denoiseFit", "denoiseRender", "colorFit", "colorRender", "maskGenerate", "maskSave", "stackCrop", "processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchRender", "stretchSave") and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
                     if operation == "stack" and getattr(e,"failed_file",None):
@@ -368,7 +431,7 @@ class Handler(BaseHTTPRequestHandler):
             if length < 0 or length > 64*1024*1024:
                 raise ValueError("请求过大，请分块上传")
             body = self.rfile.read(length) if self.command == "POST" else b""
-            image_purposes = {"images": "image", "mask-sources": "mask-source", "color-sources": "color-source"}
+            image_purposes = {"images": "image", "mask-sources": "mask-source", "color-sources": "color-source", "denoise-sources": "denoise-source"}
             if self.command == "POST" and len(parts) == 1 and parts[0] in image_purposes:
                 r = json.loads(body)
                 self.reply({"id": store.create(int(r["width"]), int(r["height"]), int(r["components"]),

@@ -65,6 +65,7 @@ function panel(options={}) {
       if(name==='./star-processing.js')return {setup:options=>{processSetups++;h.processOptions=options;return processUI;}};
       if(name==='./protection-masks.js')return {setup:options=>{h.maskOptions=options;return {updateActions(){},sync(){}};}};
       if(name==='./sky-color.js')return {setup:options=>{h.colorOptions=options;return {updateActions(){},sync(){},previewDocumentID:()=>h.colorPreviewID};}};
+      if(name==='./background-denoise.js')return {setup:options=>{h.denoiseOptions=options;return {updateActions(){},sync(){},previewDocumentID:()=>h.denoisePreviewID};}};
       throw new Error('Unexpected require '+name);
     }
   };

@@ -8,7 +8,7 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前开发分支源码为 **0.14.0 开发中**，在堆栈质量/裁剪与保护蒙版上增加局部天空校色及受保护颜色增强。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
+> 当前开发分支源码为 **0.15.0 开发中**，新增带背景范围、原图比较与细节保护的内建浮点降噪。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
 
 > 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 
@@ -54,6 +54,15 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 4. 检查颜色、取样和当前范围后确认，创建独立32位副本。原输入保留在效果层下方，可调效果层不透明度降低强度；原用户文档不改写。
 
 这属于视觉校色，不是白平衡或测光标定；暖色天空、极光与地景灯光可能有意保留，不能一律变灰。结果保留负值/HDR并报告范围，不硬裁切。灰度和未准备线性母版不自动进入此流程。[算法、数据边界与验证](docs/SKY_COLOR.md)
+
+## 背景色噪较明显时（开发功能）
+
+1. 在 **背景校正** 选择已显影图层，展开 **背景降噪**。默认只处理选区：在源照片选中可靠背景后，点击 **读取背景作用选区**；也可用保护蒙版的星点外选区。确认整层无星且适合处理时，才选择整层范围。
+2. 点击 **读取并生成降噪预览**，检查绿色参考块是否避开星云、地景和纹理。调整强度与细节保护，比较同一输入的原图和结果；改变强度复用降噪修正，不重复滤波。
+3. RGB默认仅色噪，保留工作RGB亮度；灰度使用亮度降噪。高级联合模式会改变亮度并可能削弱暗弱结构。若高频估计过于保守，只有确认参考块为平稳背景后，才开启相关噪声选项；低频变化也可能是真实结构。
+4. 检查后勾选确认，创建独立32位副本，保留原输入与可调效果层。原用户文档、alpha和ICC不改写，不整体缩放或裁切浮点范围。
+
+这是内建NLM，不需要另装AI模型。它不修复去星彩圈，不承诺所有照片细节无损；没有干净真值的实拍诊断不能当成信噪比证明。本路径只验证已显影工作图像，不代表其他降噪也必须在拉伸后进行。[选型、数值边界与验证](docs/BACKGROUND_DENOISE.md)
 
 ## 背景渐变不均时
 

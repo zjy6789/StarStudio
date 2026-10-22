@@ -6,7 +6,7 @@ let docID = null, layerList = [], busy = false, updatingPickers=false;
 let currentPage='stack', serviceReady=false, documentSnapshot=null, panelVisible=true;
 let settingsFile=null, settingsWrite=Promise.resolve();
 let modelInfo=null, acceptedLicenses=[];
-let stackUI=null, processUI=null, prepareUI=null, backgroundUI=null, stretchUI=null, maskUI=null, colorUI=null;
+let stackUI=null, processUI=null, prepareUI=null, backgroundUI=null, stretchUI=null, maskUI=null, colorUI=null, denoiseUI=null;
 const pickerValues = {};
 let blendSourceKey=null;
 const photoStages=new Map();
@@ -113,7 +113,7 @@ function workingDocument() {
   if(!doc) throw new Error('请打开源照片。');
   return host.documentInfo(doc);
 }
-function isPreview(id) { return id!=null && (id===processUI?.previewDocumentID() || id===backgroundUI?.previewDocumentID() || id===stretchUI?.previewDocumentID() || id===colorUI?.previewDocumentID()); }
+function isPreview(id) { return id!=null && (id===processUI?.previewDocumentID() || id===backgroundUI?.previewDocumentID() || id===stretchUI?.previewDocumentID() || id===colorUI?.previewDocumentID() || id===denoiseUI?.previewDocumentID()); }
 function refresh(followActive=false) {
   const doc=workingDocument();
   const previous=doc.id===docID;
@@ -171,6 +171,7 @@ function updateActions() {
   if(stretchUI) stretchUI.updateActions(busy);
   if(maskUI) maskUI.updateActions(busy);
   if(colorUI) colorUI.updateActions(busy);
+  if(denoiseUI) denoiseUI.updateActions(busy);
 }
 function syncLayers() {
   if (busy || processUI?.isModalBusy()) return;
@@ -186,6 +187,7 @@ function syncLayers() {
       if(backgroundUI) backgroundUI.sync(next,old);
       if(maskUI) maskUI.sync(next,old);
       if(colorUI) colorUI.sync(next,old);
+      if(denoiseUI) denoiseUI.sync(next,old);
       updateActions(); return;
     }
     const changed=!old || old.id!==next.id;
@@ -194,6 +196,7 @@ function syncLayers() {
     if(backgroundUI) backgroundUI.sync(next,old);
     if(maskUI) maskUI.sync(next,old);
     if(colorUI) colorUI.sync(next,old);
+    if(denoiseUI) denoiseUI.sync(next,old);
     if (changed && !['stack','prepare','stretch'].includes(currentPage)) status('选择图层后即可处理。');
     updateActions();
   } catch(e) { status(e.message,true); updateActions(); }
@@ -422,6 +425,7 @@ stackUI=require('./stack.js').setup({run,api,job,status,onSaved:(file,format)=>p
 processUI=require('./star-processing.js').setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,starEncoding:(doc,layer)=>starRelation(doc,layer).encoding,refreshBlendModes:()=>refreshBlendModes(workingDocument()),ensureService,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,currentPage:()=>currentPage});
 maskUI=require('./protection-masks.js').setup({run,api,job,status,report,selectedLayer,workingDocument,starRelation,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers});
 colorUI=require('./sky-color.js').setup({run,api,job,status,report,selectedLayer,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,stage:doc=>photoStages.get(doc.id) || 'unknown',onApplied:doc=>{photoStages.set(doc.id,'developed');refresh();documentSnapshot=snapshot();}});
+denoiseUI=require('./background-denoise.js').setup({run,api,job,status,report,selectedLayer,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,stage:doc=>photoStages.get(doc.id) || 'unknown',onApplied:doc=>{photoStages.set(doc.id,'developed');refresh();documentSnapshot=snapshot();}});
 syncLayers();
 setInterval(syncLayers,800);
 document.addEventListener('uxpcommand',event=>{
