@@ -1,4 +1,4 @@
-"""Initial linked stretching for explicitly confirmed T4 linear copies."""
+"""Initial linked stretching for confirmed T4 copies or original linear masters."""
 from contextlib import contextmanager
 import json
 from pathlib import Path
@@ -7,7 +7,7 @@ import tempfile
 import numpy as np
 import tifffile
 from .algorithms import stretch_curve, validate_image
-from .linear_preparation import KIND, PROFILE, checkpoint, fingerprint
+from .linear_preparation import KIND, PROFILE, checkpoint, fingerprint, master_data, inspect_master
 from .stack_io import linear_profile
 
 
@@ -64,6 +64,44 @@ def curve_parameters(settings, median):
     return dict(type='asinh', lnD=amount, lp=0, sp=min(float(median), hp)*(1-background), hp=hp, bp=0)
 
 
+@contextmanager
+def input_data(path, kind=None):
+    if kind == 'linear-master':
+        with master_data(path) as image:
+            yield image, None
+    else:
+        with prepared_data(path) as data:
+            yield data
+
+
+def inspect_input(path, confirmed, progress=lambda x: None, canceled=lambda: False):
+    if confirmed is not True:
+        raise ValueError('请明确确认所选文件仍未拉伸；这不是对普通照片的自动显影。')
+    path = Path(path).resolve()
+    if path.suffix.lower() not in ('.tif', '.tiff'):
+        raise ValueError('请选择Star Studio导出的32位线性TIFF母版或T4准备副本。')
+    with tifffile.TiffFile(path) as file:
+        software = file.pages[0].tags.get(305)
+        master = software is not None and software.value == 'Star Studio'
+    if not master:
+        return inspect_prepared(path, confirmed, progress, canceled)
+    info = inspect_master(path, progress, canceled)
+    checkpoint(canceled)
+    with master_data(path) as image:
+        h, w, _ = image.shape
+        step = max(1, int(np.ceil(np.sqrt(h*w/250_000))))
+        sample = image[::step, ::step].astype(np.float64)
+        positive = sample.max(axis=2) > 0
+        peak = np.abs(sample[positive]).max(axis=1)
+        quantiles = np.quantile(peak, [.01, .5, .99], method='linear').tolist() if peak.size else [0., 0., 0.]
+    check_source(info)
+    checkpoint(canceled)
+    suggestion, reason = suggest_stretch(quantiles)
+    return dict(info, inputKind='linear-master', minimum=info['stats']['min'], maximum=info['stats']['max'],
+                peakQuantiles=quantiles, sampleStep=step, sampleCount=int(peak.size),
+                suggestion=suggestion, suggestionReason=reason)
+
+
 def inspect_prepared(path, confirmed, progress=lambda x: None, canceled=lambda: False):
     if confirmed is not True:
         raise ValueError('请明确确认选择的T4副本仍未拉伸；这不是对普通照片的自动显影。')
@@ -83,6 +121,13 @@ def inspect_prepared(path, confirmed, progress=lambda x: None, canceled=lambda: 
         quantiles = np.quantile(peak, [.01, .5, .99], method='linear').tolist()
     if fingerprint(path) != before:
         raise ValueError('读取期间准备副本发生变化，请重新选择。')
+    suggestion, reason = suggest_stretch(quantiles)
+    return dict(path=str(path), fingerprint=before, width=w, height=h, profile=PROFILE, provenance=record,
+                minimum=low, maximum=high, peakQuantiles=quantiles, sampleStep=step,
+                sampleCount=int(peak.size), suggestion=suggestion, suggestionReason=reason)
+
+
+def suggest_stretch(quantiles):
     median = quantiles[1]
     suggestion = dict(amount=0., protection=.75, background=.8)
     reason = '采样中位峰值已不低于0.15；保留0强度，请先核对输入阶段。'
@@ -101,14 +146,12 @@ def inspect_prepared(path, confirmed, progress=lambda x: None, canceled=lambda: 
             reason = '达到提亮上限仍可能偏暗；请手动检查，不会自动裁黑或截断高光。'
     elif median <= 0 or quantiles[2]-quantiles[0] <= 1e-7:
         reason = '采样缺少可靠正值或接近平坦，无法自动建议；保留0强度，可手动观察。'
-    return dict(path=str(path), fingerprint=before, width=w, height=h, profile=PROFILE, provenance=record,
-                minimum=low, maximum=high, peakQuantiles=quantiles, sampleStep=step,
-                sampleCount=int(peak.size), suggestion=suggestion, suggestionReason=reason)
+    return suggestion, reason
 
 
 def check_source(info):
     if fingerprint(Path(info['path'])) != info['fingerprint']:
-        raise ValueError('准备副本已变化，请重新读取；不会继续使用旧快照。')
+        raise ValueError('线性输入文件已变化，请重新读取；不会继续使用旧快照。')
 
 
 def render_stretch(image, info, output, settings, progress=lambda x: None, canceled=lambda: False):
@@ -116,13 +159,16 @@ def render_stretch(image, info, output, settings, progress=lambda x: None, cance
     params = curve_parameters(settings, info['peakQuantiles'][1])
     if image.shape != (info['height'], info['width'], 3):
         raise ValueError('拉伸快照与来源尺寸不符')
+    master = info.get('inputKind') == 'linear-master'
     stats = dict(newBlackChannels=0, newWhiteChannels=0, nearWhitePixels=0,
                  originalBlackChannels=0, originalWhiteChannels=0, maxStorageError=0., minimum=1., maximum=0.)
+    if master:
+        stats.update(negativeChannels=0, aboveOneChannels=0, minimum=float('inf'), maximum=-float('inf'))
     h = image.shape[0]
     for y in range(0, h, 128):
         checkpoint(canceled)
         block = image[y:y+128].astype(np.float64)
-        peak = block.max(axis=2, keepdims=True)
+        peak = (np.abs(block) if master else block).max(axis=2, keepdims=True)
         if params['lnD'] == 0:
             mapped = block
         else:
@@ -130,11 +176,18 @@ def render_stretch(image, info, output, settings, progress=lambda x: None, cance
             gain = np.divide(target, peak, out=np.ones_like(peak), where=peak > 0)
             mapped = block*gain
         stored = mapped.astype(np.float32)
-        if not np.isfinite(stored).all() or np.any(stored < 0) or np.any(stored > 1):
+        if master:
+            if (not np.isfinite(stored).all() or np.any((block != 0) & (stored == 0))
+                    or np.any(np.signbit(block) != np.signbit(stored))):
+                raise ValueError('完整范围拉伸会产生非有限值、非零变零或符号变化；已停止，不裁切或填零。')
+            stats['negativeChannels'] += int(np.count_nonzero(stored < 0))
+            stats['aboveOneChannels'] += int(np.count_nonzero(stored > 1))
+        elif not np.isfinite(stored).all() or np.any(stored < 0) or np.any(stored > 1):
             raise ValueError('曲线未满足有效范围，已停止；不会通过裁切继续。')
         output[y:y+128] = stored
-        stats['newBlackChannels'] += int(np.count_nonzero((block > 0) & (stored == 0)))
-        stats['newWhiteChannels'] += int(np.count_nonzero((block < 1) & (stored == 1)))
+        stats['newBlackChannels'] += int(np.count_nonzero(((block != 0) if master else (block > 0)) & (stored == 0)))
+        if not master:
+            stats['newWhiteChannels'] += int(np.count_nonzero((block < 1) & (stored == 1)))
         stats['originalBlackChannels'] += int(np.count_nonzero(block == 0))
         stats['originalWhiteChannels'] += int(np.count_nonzero(block == 1))
         stats['nearWhitePixels'] += int(np.count_nonzero(stored.max(axis=2) >= .99))
@@ -151,15 +204,24 @@ def save_stretch(image, info, details, output, canceled=lambda: False):
     output = Path(output).resolve()
     if output.suffix.lower() not in ('.tif', '.tiff'):
         raise ValueError('受保护拉伸副本仅保存32位TIFF。')
-    for protected in [Path(info['path']).resolve(), Path(info['provenance']['source']['path']).resolve()]:
+    master = info.get('inputKind') == 'linear-master'
+    protected_paths = [Path(info['path']).resolve()]
+    if not master:
+        protected_paths.append(Path(info['provenance']['source']['path']).resolve())
+    for protected in protected_paths:
         if output == protected or (output.exists() and protected.exists() and output.samefile(protected)):
             raise ValueError('不能覆盖准备副本或原母版；请选择独立保存位置。')
     if details['stats']['newBlackChannels'] or details['stats']['newWhiteChannels']:
         raise ValueError('当前参数产生新增黑/白端点；请降低提亮程度或增加亮星保护，再预览并应用。')
     nonlinear = details['curve']['lnD'] > 0
-    record = dict(kind='starstudio-protected-stretch', schema=1, stage='developed' if nonlinear else 'linear-copy',
+    record = dict(kind='starstudio-full-range-stretch' if master else 'starstudio-protected-stretch',
+                  schema=1, stage='developed' if nonlinear else 'linear-copy',
                   nonlinearStretch=nonlinear, displayStretch=False, source={'path': info['path'], **info['fingerprint']},
-                  preparedProvenance=info['provenance'], curve=details['curve'], settings=details['settings'], precision=details['stats'])
+                  curve=details['curve'], settings=details['settings'], precision=details['stats'])
+    if master:
+        record.update(inputKind='linear-master', zeroPreserved=True, rangeClipped=False, sourceRange=info['stats'])
+    else:
+        record['preparedProvenance'] = info['provenance']
     with tempfile.TemporaryDirectory(prefix='.starstudio-stretch-', dir=output.parent) as directory:
         checkpoint(canceled)
         temporary = Path(directory)/'output.tif'

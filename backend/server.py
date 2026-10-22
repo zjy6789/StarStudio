@@ -126,15 +126,15 @@ class Store:
                         job["result"] = (inspect_master(request["path"], progress, canceled) if operation == "prepareInspect"
                                          else prepare_master(request, progress, canceled))
                     elif operation in ("stretchInspect", "stretchCheck", "stretchRender", "stretchSave"):
-                        from .protected_stretch import inspect_prepared, prepared_data, check_source, render_stretch, save_stretch
+                        from .protected_stretch import inspect_input, input_data, check_source, render_stretch, save_stretch
                         canceled = lambda: job.get("cancel", False)
                         job["message"] = {"stretchInspect": "读取线性准备副本并建议参数…", "stretchCheck": "检查准备副本是否变化…",
                                           "stretchRender": "计算受保护拉伸…", "stretchSave": "保存独立32位拉伸副本…"}[operation]
                         if operation == "stretchInspect":
-                            info = inspect_prepared(request["path"], request.get("confirmedLinear"), progress, canceled)
+                            info = inspect_input(request["path"], request.get("confirmedLinear"), progress, canceled)
                             image_id = None
                             try:
-                                with prepared_data(info["path"]) as (image, record):
+                                with input_data(info["path"], info.get("inputKind")) as (image, record):
                                     image_id = self.save(image)
                                 check_source(info)
                                 if canceled():
