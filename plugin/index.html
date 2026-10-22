@@ -82,7 +82,7 @@
       <div class="hint">使用上方选择的已显影照片或无星背景。默认只处理明确读取的背景选区；可先用保护蒙版选中星点外区域。原图与原alpha保留，不降低位深。</div>
       <label>作用范围</label><sp-picker id="denoiseScope"><sp-menu><sp-menu-item>只处理已读取的背景选区</sp-menu-item><sp-menu-item>整层（我确认为无星背景）</sp-menu-item></sp-menu></sp-picker>
       <button id="denoiseCapture">读取背景作用选区</button><div id="denoiseMaskHint" class="hint"></div>
-      <div class="row"><label>降噪强度<input id="denoiseStrength" type="number" min="0" max="1" step="0.05" value="0.5"></label><label>细节保护<input id="denoiseDetail" type="number" min="0" max="1" step="0.05" value="0.5"></label></div>
+      <div class="row numericPair"><label>降噪强度<input id="denoiseStrength" type="number" min="0" max="1" step="0.05" value="0.5"></label><label>细节保护<input id="denoiseDetail" type="number" min="0" max="1" step="0.05" value="0.5"></label></div>
       <button id="denoiseAdvancedOptions" class="disclosure">降噪类型与边界 ▾</button>
       <div id="denoiseAdvanced" class="collapsed">
         <sp-picker id="denoiseMode"><sp-menu><sp-menu-item>默认：RGB仅色噪／灰度亮度</sp-menu-item><sp-menu-item>联合亮度与色噪</sp-menu-item></sp-menu></sp-picker>
@@ -180,13 +180,13 @@
     <label>覆盖来源</label><sp-picker id="maskMode"><sp-menu><sp-menu-item>星点覆盖</sp-menu-item><sp-menu-item>星点外区域</sp-menu-item><sp-menu-item>主体选区</sp-menu-item><sp-menu-item>蓝紫晕候选（RGB星点层）</sp-menu-item></sp-menu></sp-picker>
     <div id="maskSourceHint" class="hint"></div>
     <button id="maskReadSelection">读取主体选区</button>
-    <div class="row"><label><span id="maskLowLabel">星点起点</span><input id="maskLow" type="number" min="0" max="1" step="0.0001" value="0.002"></label><label><span id="maskHighLabel">完全覆盖</span><input id="maskHigh" type="number" min="0.0001" max="1" step="0.001" value="0.02"></label></div>
+    <div class="row numericPair"><label><span id="maskLowLabel">星点起点</span><input id="maskLow" type="number" min="0" max="1" step="0.0001" value="0.002"></label><label><span id="maskHighLabel">完全覆盖</span><input id="maskHigh" type="number" min="0.0001" max="1" step="0.001" value="0.02"></label></div>
     <div id="maskHaloSettings" class="collapsed">
       <label>亮星检测下限（相对本层峰值）<input id="maskHaloBright" type="number" min="0.001" max="1" step="0.01" value="0.25"></label>
-      <div class="row"><label>外圈半径（原图像素）<input id="maskHaloRadius" type="number" min="1" max="64" step="1" value="12"></label><label>核心保护半径（原图像素）<input id="maskHaloCore" type="number" min="0" max="63" step="1" value="3"></label></div>
+      <div class="row numericPair"><label>外圈半径（原图像素）<input id="maskHaloRadius" type="number" min="1" max="64" step="1" value="12"></label><label>核心保护半径（原图像素）<input id="maskHaloCore" type="number" min="0" max="63" step="1" value="3"></label></div>
       <div class="hint">相对色差基于工作RGB，非测光或光学诊断。扩展与柔化后仍限制在核心以外、外圈以内；没有候选会停止，不生成空选区。</div>
     </div>
-    <div class="row"><label>扩展（像素）<input id="maskGrow" type="number" min="0" max="64" step="1" value="2"></label><label>外柔化（像素）<input id="maskFeather" type="number" min="0" max="64" step="0.5" value="1"></label></div>
+    <div class="row numericPair"><label>扩展（像素）<input id="maskGrow" type="number" min="0" max="64" step="1" value="2"></label><label>外柔化（像素）<input id="maskFeather" type="number" min="0" max="64" step="0.5" value="1"></label></div>
     <div class="row"><button id="maskGenerate">生成覆盖预览</button><button id="maskCancel">取消计算</button></div>
     <img id="maskPreview" class="coveragePreview" alt="保护蒙版覆盖预览，白色为目标区域">
     <div id="maskSummary" class="hint">先生成覆盖预览，再确认应用范围。</div>
@@ -221,7 +221,7 @@
   <label>对齐场景</label><sp-picker id="stackScene"><sp-menu><sp-menu-item>纯星空</sp-menu-item><sp-menu-item>仅对齐天空（排除固定地景特征）</sp-menu-item></sp-menu></sp-picker>
   <div id="stackModeHint" class="hint">实际模式：均值。逐张累积，用于普通降噪。</div>
   <div id="stackMaskEditor"><img id="stackReference"><img id="stackMask"></div>
-  <div class="row"><label><input type="checkbox" id="stackPaint"> 画笔排除对齐区域</label><span>笔刷</span><input id="stackBrush" type="range" min="10" max="160" value="60"><button id="stackClearMask">清除蒙版</button></div>
+  <div class="row brushControls"><label><input type="checkbox" id="stackPaint"> 画笔排除对齐区域</label><span>笔刷</span><input id="stackBrush" type="range" min="10" max="160" value="60"><button id="stackClearMask">清除蒙版</button></div>
   <div class="hint">地景模式和红色蒙版仅排除对齐特征，不删除像素，也不保留清晰地景。整张照片随天空对齐，地景可能拖花。</div>
   <label class="processCompare"><input id="stackReferenceGround" type="checkbox"> 同时保留参考地景，创建天空与地景两层</label>
   <div id="stackReferenceGroundHint" class="hint">可选保留中间单帧供PS蒙版融合；参考地景没有多帧降噪，也不会自动融合地平线。</div>
