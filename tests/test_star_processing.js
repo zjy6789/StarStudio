@@ -398,3 +398,71 @@ test('failed native preview updates keep the previous picture labeled as failed 
   h.host.canvasStarPreview=native;h.emit('processBlend','change','linearDodge');await h.flush();
   assert.match(h.elements.get('processPreviewHint').textContent,/未启用加工/);
 });
+
+test('an invalid background stops pixel work and cannot be applied before the selection is corrected',async()=>{
+  const h=processingHarness();
+  h.emit('processSource','change',11);await h.flush();
+  h.emit('processBackground','change',11);
+  h.elements.get('glowEnabled').checked=true;h.emit('glowEnabled','change');await h.tick(180);
+  assert.match(h.elements.get('processPreviewHint').textContent,/选择无效.*背景与星点/);
+  assert.equal(h.elements.get('processExecute').disabled,true);
+  assert.equal(h.elements.get('processOriginal').disabled,true);
+  assert.equal(h.calls.uploads.length,0);assert.equal(h.calls.jobs.length,0);
+  await assert.rejects(h.emit('processExecute','click'),/背景与星点请选择不同图层/);
+  assert.equal(h.calls.uploads.length,0);assert.equal(h.calls.jobs.length,0);assert.equal(h.calls.outputs.length,0);
+});
+
+test('an invalid background cancels pending processing without restarting or deleting its live source',async()=>{
+  const h=processingHarness();h.cancelDelayed=true;await h.enableGlow();
+  h.emit('processBackground','change',11);await h.flush();
+  assert.equal(h.jobs.get('job1').cancel,true);
+  await h.tick(180);assert.equal(h.calls.jobs.length,1);assert.equal(h.images.has('input1'),true);
+  h.finish('job1','canceled');await h.tick(150);await h.tick(180);
+  assert.equal(h.calls.jobs.length,1);assert.deepEqual(h.calls.unsafeDeletes,[]);
+  h.emit('processBackground','change',12);await h.flush();await h.tick(180);
+  assert.equal(h.calls.jobs.length,2);assert.equal(h.calls.jobs[1].request.image,'input1');
+  assert.equal(h.calls.uploads.length,1);h.finish('job2');await h.tick(150);
+  assert.match(h.elements.get('processPreviewHint').textContent,/已更新/);
+  assert.equal(h.elements.get('processExecute').disabled,false);
+});
+
+test('correcting an invalid background restores the cached result and never publishes a superseded composition',async()=>{
+  const h=processingHarness(),native=h.host.canvasStarPreview,gate=deferred();
+  await h.enableGlow();h.finish('job1');await h.tick(150);
+  h.host.canvasStarPreview=async(...args)=>{
+    if(args[3]?.layer.id===13) {
+      await gate.promise;
+      if(!args.at(-1)()){const error=new Error('Superseded');error.stale=true;throw error;}
+    }
+    return native(...args);
+  };
+  h.emit('processBackground','change',13);await h.flush();
+  h.emit('processBackground','change',11);await h.flush();gate.resolve();await h.flush();
+  assert.match(h.elements.get('processPreviewHint').textContent,/选择无效/);
+  assert.doesNotMatch(h.elements.get('processPreviewHint').textContent,/已更新/);
+  h.emit('processBackground','change',12);await h.flush();await h.tick(180);
+  assert.equal(h.calls.native.at(-1).result.image,'resultjob1');
+  assert.equal(h.calls.native.at(-1).background,12);
+  assert.equal(h.calls.jobs.length,1);assert.equal(h.calls.uploads.length,1);
+  assert.match(h.elements.get('processPreviewHint').textContent,/已更新/);
+});
+
+test('invalid selection while a job is being created cancels that job as soon as its id arrives',async()=>{
+  const h=processingHarness(),gate=deferred();h.createGate=gate;h.cancelDelayed=true;
+  await h.enableGlow();h.emit('processBackground','change',11);await h.flush();
+  gate.resolve();await h.flush();assert.equal(h.jobs.get('job1').cancel,true);
+  h.finish('job1','canceled');await h.tick(150);await h.tick(180);
+  assert.equal(h.calls.jobs.length,1);assert.deepEqual(h.calls.unsafeDeletes,[]);
+  assert.match(h.elements.get('processPreviewHint').textContent,/选择无效/);
+});
+
+test('a result completing before cancellation is discarded when the background selection is invalid',async()=>{
+  const h=processingHarness(),gate=deferred();h.pollGate=gate;
+  await h.enableGlow();h.finish('job1');h.emit('processBackground','change',11);await h.flush();
+  gate.resolve();await h.flush();await h.tick(180);
+  assert.equal(h.images.has('resultjob1'),false);assert.equal(h.images.has('input1'),true);
+  assert.equal(h.calls.jobs.length,1);assert.deepEqual(h.calls.unsafeDeletes,[]);
+  assert.match(h.elements.get('processPreviewHint').textContent,/选择无效/);
+  h.emit('processBackground','change',12);await h.flush();await h.tick(180);
+  assert.equal(h.calls.jobs.length,2);assert.equal(h.calls.uploads.length,1);
+});

@@ -17,7 +17,7 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
   refreshBlendModes=()=>{},starEncoding=(doc,layer)=>host.starEncoding(doc,layer),ensureService=async()=>{},isBusy=()=>false,isUpdatingPickers=()=>false}) {
   let meta=null,last=null,desired=null,timer=null,previewState=null,worker=null,jobID=null;
   let paused=false,modalBusy=false,compositionVersion=0,compositionKey=null,nativeQueue=Promise.resolve(),failedKey=null,runningKey=null;
-  let displayed=null,compositionError=null;
+  let displayed=null,compositionError=null,selectionError=null;
   const applied=[];
   function related(doc,source) {
     const parent=applied.find(record=>record.docID===doc.id && record.layerID===source.id);
@@ -64,7 +64,8 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
     const originalName=value('processBackground')==null?'原星点':'原合成';
     $('processCompareLabel').textContent='查看'+originalName;
     let message;
-    if(!desired) message='选择星点后自动打开全分辨率预览。';
+    if(selectionError) message='图层选择无效；'+(displayed?'当前仍为上次完成画面。':'尚未生成预览。')+selectionError;
+    else if(!desired) message='选择星点后自动打开全分辨率预览。';
     else if(compositionError) message='预览更新失败；'+(displayed?'当前仍为上次完成画面。':'尚未生成预览。')+compositionError;
     else if(displayed?.sourceKey!==desired.info.sourceKey) message='正在切换来源；当前预览尚未显示所选图层。';
     else if(displayed.composition!==compositionKey) message='正在更新背景与混合；当前仍为上次完成画面。';
@@ -73,6 +74,11 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
     else if(displayed.key===desired.key) message='全分辨率预览已更新，与当前参数一致。';
     else message=(failedKey===desired.key?'当前参数计算失败；':'正在计算新参数；')+(displayed.key?'当前显示上次完成结果。':'当前显示'+originalName+'。');
     $('processPreviewHint').textContent=message;
+  }
+  function invalidateSelection(error) {
+    selectionError=error.message || String(error);compositionError=null;
+    ++compositionVersion;compositionKey=null;clearTimeout(timer);cancel();
+    updateActions();previewHint();status(selectionError,true);
   }
   function settingsHint() {
     const options=settings(),enabled=[];
@@ -84,12 +90,12 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
     $('processSettingsHint').textContent=enabled.length?'已启用：'+enabled.join('；')+'。':'未启用加工；展开卡片只查看参数。';
   }
   function compose() {
-    if(paused || isBusy() || !desired || currentPage()!=='process') return Promise.resolve();
+    if(paused || isBusy() || selectionError || !desired || currentPage()!=='process') return Promise.resolve();
     const selected=desired,original=$('processOriginal').checked;
     const result=original || !selected.enabled?null:last?.sourceKey===selected.info.sourceKey?
       {...last.result,width:selected.info.width,height:selected.info.height,components:selected.info.components}:null;
     let backdrop;
-    try {backdrop=background();} catch(e) {status(e.message,true);return Promise.resolve();}
+    try {backdrop=background();} catch(e) {invalidateSelection(e);return Promise.resolve();}
     const blend=value('processBlend'),key=JSON.stringify([selected.info.sourceKey,result?.image,backdrop?.layer.id,backdrop?.key,blend]);
     if(key===compositionKey) {previewHint();return nativeQueue;}
     compositionKey=key;compositionError=null;
@@ -120,11 +126,14 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
         if(next?.enabled) status('参数已变化，正在准备全分辨率预览；当前画面仍为原合成或上次结果。');
       }
       else desired=next;
+      if(desired) background();
+      if(selectionError) failedKey=null;
+      selectionError=null;
       compose();updateActions();previewHint();
       if(desired && (desired.enabled && last?.key!==desired.key || !desired.enabled && (meta || last)))
         if(desired.key!==failedKey) timer=setTimeout(startWorker,180);
       if(!desired && (meta || last || previewState)) timer=setTimeout(startWorker,180);
-    } catch(e) {status(e.message || String(e),true);}
+    } catch(e) {invalidateSelection(e);}
   }
   function defaults() {
     for(const [name,,,specs] of tools) {
@@ -185,8 +194,8 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
   }
   function updateActions(busy=false) {
     const selected=value('processSource')!=null;
-    $('processExecute').disabled=busy || !selected;
-    $('processOriginal').disabled=busy || !selected;
+    $('processExecute').disabled=busy || !selected || !!selectionError;
+    $('processOriginal').disabled=busy || !selected || !!selectionError;
     $('processBlend').disabled=busy || desired?.info.starEncoding==='gray';
     if(previewState && !host.app.documents.some(d=>d.id===previewState.docID)) {previewState=null;compositionKey=null;displayed=null;}
   }
@@ -196,47 +205,47 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
   }
   async function process(request,key) {
     const created=await api('/jobs',request);jobID=created.id;
-    if(paused || desired?.key!==key) cancel();
+    if(paused || selectionError || desired?.key!==key) cancel();
     try {
       while(true) {
         const state=await api('/jobs/'+created.id);
         if(state.state==='done') return state.result;
         if(state.state==='canceled') return null;
         if(state.state==='error') throw new Error(state.error);
-        if(!paused && desired) {report(state.progress);status(state.message || '正在更新全分辨率预览…');}
+        if(!paused && !selectionError && desired) {report(state.progress);status(state.message || '正在更新全分辨率预览…');}
         await new Promise(resolve=>setTimeout(resolve,150));
       }
     } finally {jobID=null;}
   }
   function startWorker() {
-    if(worker || paused || isBusy()) return;
-    worker=render().catch(e=>{failedKey=runningKey;if(desired?.key===runningKey) {status(e.message || String(e),true);previewHint();}}).finally(()=>{
+    if(worker || paused || selectionError || isBusy()) return;
+    worker=render().catch(e=>{failedKey=runningKey;if(!selectionError && desired?.key===runningKey) {status(e.message || String(e),true);previewHint();}}).finally(()=>{
       worker=null;
-      if(!paused && currentPage()==='process' && desired?.enabled && last?.key!==desired.key && desired.key!==failedKey) timer=setTimeout(startWorker,180);
+      if(!paused && !selectionError && currentPage()==='process' && desired?.enabled && last?.key!==desired.key && desired.key!==failedKey) timer=setTimeout(startWorker,180);
     });
   }
   async function render() {
-    while(!paused && currentPage()==='process' && desired) {
+    while(!paused && !selectionError && currentPage()==='process' && desired) {
       const target=desired;
       runningKey=target.key;
       if(!target.enabled) {await clearImages();return;}
       if(last?.key===target.key) return;
       await ensureService();
-      if(paused || desired?.key!==target.key) continue;
+      if(paused || selectionError || desired?.key!==target.key) continue;
       if(meta?.sourceKey!==target.info.sourceKey) {
         await clearImages();
         status('正在读取完整星点图层…');
         meta=await native(()=>host.core.executeAsModal(()=>host.upload(target.doc,target.layer,api,report),{commandName:'读取完整星点图层'}));
         meta.sourceKey=target.info.sourceKey;
       }
-      if(paused || desired?.key!==target.key) continue;
+      if(paused || selectionError || desired?.key!==target.key) continue;
       const result=await process({op:'processStars',image:meta.id,settings:target.options,preview:false,scale:1,starEncoding:target.info.starEncoding},target.key);
       if(!result) continue;
-      if(paused || desired?.key!==target.key) {await remove(result.image);continue;}
+      if(paused || selectionError || desired?.key!==target.key) {await remove(result.image);continue;}
       const previous=last;
       last={key:target.key,sourceKey:target.info.sourceKey,result};
       await compose();await remove(previous?.result.image);
-      if(desired?.key===target.key && !paused) {
+      if(desired?.key===target.key && !paused && !selectionError) {
         curvePlot(result.curve);
         if(displayed?.key===target.key && displayed.composition===compositionKey) status('全分辨率预览已更新。'+(result.reconstructedStars?' 重建 '+result.reconstructedStars+' 个星点。':''));
       }
@@ -262,7 +271,7 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
   $('processNatural').addEventListener('click',()=>preset('reduction'));
   $('processSoft').addEventListener('click',()=>preset('glow'));
   $('processExecute').addEventListener('click',()=>run(async()=>{
-    const target=selection(),blend=value('processBlend');
+    const target=selection(),blend=value('processBlend'),backdrop=background();
     let output,result,temporary=false;
     try {
       if(target.enabled) {
@@ -274,7 +283,6 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
         result=last?.key===target.key?last.result:await job({op:'processStars',image:meta.id,settings:target.options,preview:false,scale:1,starEncoding:target.info.starEncoding});
         temporary=result!==last?.result;
       }
-      const backdrop=background();
       const family=related(target.doc,target.layer);
       const composition=await native(()=>host.applyStarResult({doc:target.doc,source:target.layer,background:backdrop?.layer,
         blend,result,meta,previous:family.records.map(record=>record.rootID)},api,report));

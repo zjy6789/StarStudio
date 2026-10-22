@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "local.astro.starlayers",
   "name": "Star Studio",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "main": "index.html",
   "host": {"app": "PS", "minVersion": "25.0.0", "data": {"apiVersion": 2}},
   "entrypoints": [{"type": "panel", "id": "starLayers", "label": {"default": "Star Studio"}, "minimumSize": {"width": 660, "height": 650}, "maximumSize": {"width": 2000, "height": 2000}, "preferredDockedSize": {"width": 700, "height": 900}, "preferredFloatingSize": {"width": 740, "height": 960}, "icons": [{"width":23,"height":23,"path":"icon-dark.png","scale":[1,2],"theme":["darkest","dark","medium"]},{"width":23,"height":23,"path":"icon-light.png","scale":[1,2],"theme":["lightest","light"]}]}],
