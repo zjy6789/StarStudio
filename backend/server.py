@@ -322,7 +322,8 @@ class Store:
                             self.processing_cache["source"] = source
                         options = {"encoding": encoding} if encoding != "black" else {}
                         options["canceled"] = lambda: job.get("cancel", False)
-                        output, details = process_stars(self.get(request["image"]), request["settings"],
+                        purpose = "star-source" if encoding == "signed" and self.images[request["image"]]["purpose"] == "star-source" else "image"
+                        output, details = process_stars(self.get(request["image"], purpose), request["settings"],
                                                        self.path, scale, progress, self.processing_cache, **options)
                         if job.get("cancel"):
                             job["state"] = "canceled"
@@ -438,7 +439,7 @@ class Handler(BaseHTTPRequestHandler):
             if length < 0 or length > 64*1024*1024:
                 raise ValueError("请求过大，请分块上传")
             body = self.rfile.read(length) if self.command == "POST" else b""
-            image_purposes = {"images": "image", "mask-sources": "mask-source", "color-sources": "color-source", "denoise-sources": "denoise-source"}
+            image_purposes = {"images": "image", "mask-sources": "mask-source", "color-sources": "color-source", "denoise-sources": "denoise-source", "star-sources": "star-source"}
             if self.command == "POST" and len(parts) == 1 and parts[0] in image_purposes:
                 r = json.loads(body)
                 self.reply({"id": store.create(int(r["width"]), int(r["height"]), int(r["components"]),
@@ -457,7 +458,10 @@ class Handler(BaseHTTPRequestHandler):
                     if len(body) != rows*a.shape[1]*a.shape[2]*4:
                         raise ValueError("图像块字节数不符")
                     block = np.frombuffer(body, dtype="<f4").reshape(rows, a.shape[1], a.shape[2])
-                    if purpose != "image":
+                    if purpose == "star-source":
+                        from .star_processing import validate_star_source
+                        validate_star_source(block)
+                    elif purpose != "image":
                         from .protection_masks import validate_source
                         validate_source(block)
                     else:

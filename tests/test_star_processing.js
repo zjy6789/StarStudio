@@ -97,6 +97,8 @@ function processingHarness(setupOverrides={}) {
   };
   const harness={elements,timers,calls,values,jobs,images,doc,host,layers,cancelDelayed:false,createGate:null,pollGate:null};
   async function api(path,body,binary,method='GET') {
+    calls.api??=[];calls.api.push({path,method:body!==undefined?'POST':method});
+    if(path==='/images' || path==='/star-sources') {const id='input'+(++imageID);images.add(id);return {id};}
     if(path==='/jobs') {
       const id='job'+(calls.jobs.length+1),entry={id,state:'running',progress:.25,request:body};
       calls.jobs.push(entry);jobs.set(id,entry);
@@ -109,8 +111,8 @@ function processingHarness(setupOverrides={}) {
       const gate=harness.pollGate;harness.pollGate=null;if(gate)await gate.promise;
       return {state:entry.state,progress:entry.progress,result:entry.result,error:entry.error};
     }
-    if(path.startsWith('/images/') && method==='DELETE') {
-      const key=path.slice(8);
+    if((path.startsWith('/images/') || path.startsWith('/star-sources/')) && method==='DELETE') {
+      const key=path.split('/')[2];
       if(calls.jobs.some(j=>j.request.image===key && ['running','queued'].includes(j.state)))calls.unsafeDeletes.push(key);
       images.delete(key);calls.deleted.push(key);return {ok:true};
     }
@@ -153,6 +155,22 @@ test('gray correction layers send their encoding and retain Linear Light in prev
   assert.equal(h.calls.native.at(-1).blend,'linearLight');
   await h.emit('processExecute','click');await h.flush();
   assert.equal(h.calls.outputs.at(-1).blendMode,'linearLight');
+});
+
+test('signed star input uses its dedicated upload and cleanup route in preview and direct apply',async()=>{
+  for(const direct of [false,true]) {
+    const h=processingHarness();
+    h.doc.bitsPerChannel='thirtytwo';
+    let input;
+    h.host.upload=async(doc,layer,api)=>{const {id}=await api('/images',{width:1,height:1,components:4});input=id;return {id,size:32};};
+    h.values.processSource=11;h.elements.get('glowEnabled').checked=true;
+    if(direct) await h.emit('processExecute','click');
+    else {h.emit('glowEnabled','change');await h.tick(180);}
+    assert.equal(h.calls.api[0].path,'/star-sources');
+    if(!direct){h.finish(h.calls.jobs[0].id);await h.tick(150);await h.ui.pause();}
+    h.values.processSource=null;h.ui.resume();await h.tick(180);await h.flush();
+    assert.ok(h.calls.api.some(r=>r.path==='/star-sources/'+input&&r.method==='DELETE'));
+  }
 });
 
 test('selecting stars opens original native full-resolution preview without reading pixels or running the backend',async()=>{

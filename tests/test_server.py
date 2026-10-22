@@ -62,6 +62,63 @@ def test_canvas_preview_reuses_storage_and_replaces_changed_size(tmp_path):
     assert not (tmp_path / f"{key}.npy").exists()
 
 
+def test_signed_star_upload_preserves_values_and_isolates_ordinary_jobs(tmp_path):
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.token, server.store = 'test', Store(tmp_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    def api(path, body=None, method='GET', binary=False):
+        data = body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None
+        request = urllib.request.Request(f'http://127.0.0.1:{server.server_port}'+path, data,
+            headers={'X-Star-Token': 'test'}, method='POST' if data is not None else method)
+        with opener.open(request, timeout=30) as response:
+            return response.read() if binary else json.load(response)
+    try:
+        shape = dict(width=2, height=1, components=4)
+        raw = np.array([[[-.125, .5, 1, .75], [-1, 1e-30, 0, 1]]], dtype='<f4')
+        key = api('/star-sources', shape)['id']
+        assert api(f'/star-sources/{key}?y=0&rows=1', raw.tobytes()) == {'ready': True}
+        np.testing.assert_array_equal(np.frombuffer(api(f'/star-sources/{key}?y=0&rows=1', binary=True), dtype='<f4').view('u4'), raw.ravel().view('u4'))
+        with pytest.raises(urllib.error.HTTPError):
+            api(f'/images/{key}?y=0&rows=1', binary=True)
+        for encoding in ('black', 'gray'):
+            job = wait_for_job(server.store, server.store.job(dict(op='processStars', image=key, settings={}, starEncoding=encoding)))
+            assert job['state'] == 'error'
+        rejected = wait_for_job(server.store, server.store.job(dict(op='extract', image=key)))
+        assert rejected['state'] == 'error' and '专用来源' in rejected['error']
+        done = wait_for_job(server.store, server.store.job(dict(op='processStars', image=key, settings={}, starEncoding='signed')))
+        assert done['state'] == 'done', done
+        np.testing.assert_array_equal(server.store.get(done['result']['image']).view('u4'), raw.view('u4'))
+        api('/star-sources/'+key, method='DELETE')
+        assert key not in server.store.images and not server.store.processing_cache
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=30)
+
+
+@pytest.mark.parametrize('channel,value', [(0, -1.01), (2, 1.01), (0, float('nan')), (1, float('inf')), (3, -.01), (3, 1.01)])
+def test_signed_star_upload_rejects_invalid_block_without_advancing(tmp_path, channel, value):
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.token, server.store = 'test', Store(tmp_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    def post(path, body):
+        request = urllib.request.Request(f'http://127.0.0.1:{server.server_port}'+path, body, headers={'X-Star-Token': 'test'})
+        return opener.open(request, timeout=30)
+    try:
+        with post('/star-sources', b'{"width":1,"height":1,"components":4}') as response:
+            key = json.load(response)['id']
+        raw = np.array([[[.1, .2, .3, 1]]], dtype='<f4'); raw[0, 0, channel] = value
+        with pytest.raises(urllib.error.HTTPError) as error:
+            post(f'/star-sources/{key}?y=0&rows=1', raw.tobytes())
+        assert error.value.code == 400
+        entry = server.store.images[key]
+        assert entry['rows'] == 0 and not entry['ready']
+        np.testing.assert_array_equal(entry['data'], 0)
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=30)
+
+
 def wait_for_job(store, key):
     deadline = time.monotonic() + 5
     while store.jobs[key]["state"] in ("queued", "running") and time.monotonic() < deadline:

@@ -43,7 +43,12 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
     });
     nativeQueue=work.catch(()=>{});return work;
   }
-  const remove=key=>key?api('/images/'+key,undefined,false,'DELETE').catch(()=>{}):Promise.resolve();
+  const remove=(key,path='/images')=>key?api(path+'/'+key,undefined,false,'DELETE').catch(()=>{}):Promise.resolve();
+  async function uploadSource(target) {
+    const path=target.info.starEncoding==='signed'?'/star-sources':'/images';
+    const uploadAPI=(url,...args)=>api(url.replace(/^\/images(?=\/|$)/,path),...args);
+    return {...await host.upload(target.doc,target.layer,uploadAPI,report),path};
+  }
   function selection() {
     const {doc,layer}=selectedLayer('processSource');
     refreshBlendModes();
@@ -201,7 +206,7 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
   }
   async function clearImages() {
     await nativeQueue;
-    await remove(last?.result.image);await remove(meta?.id);last=null;meta=null;
+    await remove(last?.result.image);await remove(meta?.id,meta?.path);last=null;meta=null;
   }
   async function process(request,key) {
     const created=await api('/jobs',request);jobID=created.id;
@@ -238,7 +243,7 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
         status('正在读取完整星点图层…');
         meta=await native(()=>host.core.executeAsModal(()=>{
           if(paused || selectionError || currentPage()!=='process' || desired?.key!==target.key) return null;
-          return host.upload(target.doc,target.layer,api,report);
+          return uploadSource(target);
         },{commandName:'读取完整星点图层'}));
         if(meta===null) continue;
         meta.sourceKey=target.info.sourceKey;
@@ -283,7 +288,7 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
       if(target.enabled) {
         if(meta?.sourceKey!==target.info.sourceKey) {
           await clearImages();
-          meta=await native(()=>host.core.executeAsModal(()=>host.upload(target.doc,target.layer,api,report),{commandName:'读取完整星点图层'}));
+          meta=await native(()=>host.core.executeAsModal(()=>uploadSource(target),{commandName:'读取完整星点图层'}));
           meta.sourceKey=target.info.sourceKey;
         }
         result=last?.key===target.key?last.result:await job({op:'processStars',image:meta.id,settings:target.options,preview:false,scale:1,starEncoding:target.info.starEncoding});

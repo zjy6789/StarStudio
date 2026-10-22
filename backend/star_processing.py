@@ -24,6 +24,14 @@ from .paths import siril_path
 SIRIL = siril_path()
 
 
+def validate_star_source(image):
+    from .protection_masks import validate_source
+    validate_source(image)
+    colors = image[..., :color_count(image)]
+    if colors.min() < -1 or colors.max() > 1:
+        raise ValueError('浮点星点差值需要在 -1..1 内；不裁切负值或高光，请保留原图并核对星点来源。')
+
+
 def check_cancel(canceled):
     if canceled():
         raise InterruptedError('星点加工已取消')
