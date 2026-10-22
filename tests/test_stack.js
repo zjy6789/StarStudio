@@ -10,7 +10,8 @@ function panel() {
   for(const match of fs.readFileSync('plugin/index.html','utf8').matchAll(/id="([^"]+)"/g)) {
     const classes=new Set(),listeners=new Map(),menu={children:[],appendChild(item){this.children.push(item);},set innerHTML(value){this.children=[];}};
     elements.set(match[1],{value:'20',checked:false,selectedIndex:0,disabled:false,
-      classList:{contains:name=>classes.has(name),toggle(name){classes.has(name)?classes.delete(name):classes.add(name);}},
+      classList:{contains:name=>classes.has(name),toggle(name,force){(force===undefined?!classes.has(name):force)?classes.add(name):classes.delete(name);}},
+      setAttribute(name,value){this[name]=value;},
       addEventListener(name,action){listeners.set(name,action);},listeners,
       menu,querySelector:()=>menu,
       getBoundingClientRect:()=>({left:10,top:20,width:400,height:400}),
@@ -74,6 +75,77 @@ test('file and folder inspection filters inputs, selects the middle frame, and k
   h.folder={getEntries:async()=>[file('a.NEF'),file('b.nef'),file('c.nef'),file('notes.txt')]};
   await h.emit('stackFolder');assert.deepEqual(h.calls.jobs[1].paths,h.inspected.paths);
   h.folder=null;await h.emit('stackFolder');assert.equal(h.calls.jobs.length,2);
+});
+
+test('basic purposes default to mean and float DNG while advanced disclosure never changes settings',async()=>{
+  const h=panel();assert.equal(h.get('stackMeanIntent').classList.contains('selected'),true);
+  assert.equal(h.get('stackRawGoal').classList.contains('selected'),true);assert.equal(h.calls.jobs.length,0);
+  h.emit('stackAdvancedOptions');assert.equal(h.get('stackAdvancedSettings').classList.contains('expanded'),true);
+  h.get('stackMode').selectedIndex=1;h.emit('stackMode','change');h.get('stackFormat').selectedIndex=1;h.emit('stackFormat','change');
+  h.emit('stackAdvancedOptions');assert.equal(h.get('stackAdvancedSettings').classList.contains('expanded'),false);
+  assert.equal(h.get('stackMode').selectedIndex,1);assert.equal(h.get('stackFormat').selectedIndex,1);
+  assert.equal(h.calls.jobs.length,0);assert.match(h.get('stackModeHint').textContent,/高级模式：中位数/);
+  assert.match(h.get('stackFormatHint').textContent,/16 位 TIFF.*量化.*负值截为 0/);
+});
+
+for(const [button,mode,index] of [['stackMeanIntent','mean',0],['stackRejectIntent','sigma',2]])test(`${mode} purpose reaches the existing numeric mode without starting work on selection`,async()=>{
+  const h=panel();await h.select();h.get('stackMode').selectedIndex=3;h.emit('stackMode','change');
+  h.emit(button);assert.equal(h.calls.jobs.length,1);assert.equal(h.get('stackMode').selectedIndex,index);
+  assert.equal(h.get(button).classList.contains('selected'),true);
+  if(mode==='sigma')assert.match(h.get('stackModeHint').textContent,/想保留的流星/);
+  await h.execute();assert.equal(h.calls.jobs.at(-1).mode,mode);
+});
+
+for(const [button,format,index,extension] of [['stackRawGoal','dng',0,'dng'],['stackPluginGoal','tiff32',2,'tif'],['stackAstroGoal','fits32',4,'fit']])test(`${format} output purpose saves the stated float master and keeps the FITS bridge`,async()=>{
+  const h=panel();await h.select();h.get('stackFormat').selectedIndex=1;h.emit('stackFormat','change');
+  h.emit(button);assert.equal(h.calls.jobs.length,1);assert.equal(h.get('stackFormat').selectedIndex,index);
+  assert.equal(h.get(button).classList.contains('selected'),true);h.saved=file('result.'+extension);
+  await h.execute();assert.equal(h.calls.jobs.at(-1).format,format);assert.equal(h.calls.save.at(-1).name,'StarStudio_stack.'+extension);
+  if(format==='fits32')assert.notEqual(h.calls.jobs.at(-1).photoshopOutput,h.saved.nativePath);
+  if(format==='tiff32')assert.match(h.get('stackFormatHint').textContent,/尚未拉伸.*母版准备/);
+});
+
+test('all custom modes remain visible as advanced and closing their controls cannot reset the chosen operation',async()=>{
+  const h=panel();await h.select();
+  for(const index of [1,3,4]) {
+    h.get('stackMode').selectedIndex=index;h.emit('stackMode','change');
+    assert.equal(h.get('stackMeanIntent').classList.contains('selected'),false);assert.equal(h.get('stackRejectIntent').classList.contains('selected'),false);
+    assert.match(h.get('stackModeHint').textContent,/高级模式/);
+    if(index===3)assert.match(h.get('stackModeHint').textContent,/不是星轨合成/);
+    h.emit('stackAdvancedOptions');h.emit('stackAdvancedOptions');await h.execute();
+    assert.equal(h.calls.jobs.at(-1).mode,['mean','median','sigma','maximum','minimum'][index]);
+  }
+});
+
+test('16-bit manual formats remain advanced with persistent loss notes until an explicit float purpose replaces them',async()=>{
+  const h=panel();await h.select();
+  for(const index of [1,3]) {
+    h.get('stackFormat').selectedIndex=index;h.emit('stackFormat','change');
+    for(const id of ['stackRawGoal','stackPluginGoal','stackAstroGoal'])assert.equal(h.get(id).classList.contains('selected'),false);
+    assert.match(h.get('stackFormatHint').textContent,/高级格式.*量化/);
+    h.emit('stackAdvancedOptions');h.emit('stackAdvancedOptions');await h.execute();
+    assert.equal(h.calls.jobs.at(-1).format,index===1?'tiff16':'fits16');
+  }
+  h.emit('stackPluginGoal');await h.execute();assert.equal(h.calls.jobs.at(-1).format,'tiff32');
+});
+
+test('new files, reference changes and canceled pickers preserve explicit purposes and manual formats',async()=>{
+  const h=panel();await h.select();h.emit('stackRejectIntent');h.emit('stackAstroGoal');
+  h.files=[file('new-a.nef'),file('new-b.nef'),file('new-c.nef')];await h.select();
+  assert.equal(h.get('stackMode').selectedIndex,2);assert.equal(h.get('stackFormat').selectedIndex,4);
+  h.get('stackReferenceChoice').selectedIndex=0;await h.emit('stackReferenceChoice','change');
+  assert.equal(h.get('stackMode').selectedIndex,2);assert.equal(h.get('stackFormat').selectedIndex,4);
+  h.get('stackFormat').selectedIndex=3;h.emit('stackFormat','change');await h.select();
+  assert.equal(h.get('stackFormat').selectedIndex,3);const count=h.calls.jobs.length;
+  h.files=null;await h.select();assert.equal(h.calls.jobs.length,count);assert.equal(h.get('stackFormat').selectedIndex,3);
+});
+
+test('all purpose and advanced controls stay disabled during the active stack job and recover',async()=>{
+  const h=panel();await h.select();let release;h.gate=new Promise(resolve=>{release=resolve;});
+  const pending=h.execute();await new Promise(setImmediate);
+  const ids=['stackMeanIntent','stackRejectIntent','stackRawGoal','stackPluginGoal','stackAstroGoal','stackAdvancedOptions','stackMode','stackFormat'];
+  for(const id of ids)assert.equal(h.get(id).disabled,true,id);
+  release();await pending;for(const id of ids)assert.equal(h.get(id).disabled,false,id);
 });
 
 test('unsupported or single-image selections fail before inspection',async()=>{

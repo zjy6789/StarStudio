@@ -8,6 +8,7 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
   let originalPaths=[],failedFile=null,reportResult=null;
   const calibration={dark:[],flat:[],bias:[],darkflat:[]};
   const modes=['mean','median','sigma','maximum','minimum'], formats=['dng','tiff16','tiff32','fits16','fits32'];
+  const intents=[['stackMeanIntent',0],['stackRejectIntent',2]], outputs=[['stackRawGoal',0],['stackPluginGoal',2],['stackAstroGoal',4]];
   for(const id of ['stackMode','stackScene']) $(id).selectedIndex=0;
   $('stackFormat').selectedIndex=0;
   function updateActions(busy=false) {
@@ -21,7 +22,7 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
     $('stackExcludeFailed').disabled=busy || !failedFile || !selection || selection.paths.length<3;
     $('stackRestoreFrames').disabled=busy || !selection || originalPaths.length===selection.paths.length;
     $('stackReferenceChoice').disabled=busy || !selection;
-    for(const id of ['stackFiles','stackFolder','stackMode','stackScene','stackFormat','stackLinearTiff','stackReferenceGround']) $(id).disabled=busy;
+    for(const id of ['stackFiles','stackFolder','stackMode','stackAdvancedOptions','stackScene','stackFormat','stackLinearTiff','stackReferenceGround',...intents.map(x=>x[0]),...outputs.map(x=>x[0])]) $(id).disabled=busy;
     for(const kind of Object.keys(calibration)) {
       const prefix='stack'+kind[0].toUpperCase()+kind.slice(1);
       for(const action of ['Files','Folder','Clear']) $(prefix+action).disabled=busy || (action==='Clear' && !calibration[kind].length);
@@ -123,16 +124,23 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
     $(prefix+'Clear').addEventListener('click',()=>{calibration[kind]=[];showSelection();updateActions();});
   }
   function formatHint() {
+    const selected=$('stackFormat').selectedIndex;
+    for(const [id,index] of outputs){$(id).classList.toggle('selected',selected===index);$(id).setAttribute('aria-pressed',String(selected===index));}
     const hints=[
-      'DNG 保留 32 位浮点；Photoshop 打开位深由 Camera Raw 设置决定。',
-      '16 位 TIFF 会量化并将负值截为 0；超范围高光统一缩放。保留完整校准浮点结果请选 DNG 或 32 位格式。',
-      '32 位 TIFF 保留负值及超范围高光，带线性 ProPhoto RGB ICC，可直接在 Photoshop 打开。',
-      '16 位 FITS 以 BSCALE/BZERO 保留正负范围，仍有量化；Siril 1.4.2 不能完整读取此缩放，需用 Siril 时请选择 32 位 FITS。Photoshop 打开未量化的临时 32 位 TIFF。',
-      '32 位 FITS 保留负值、超范围高光及色彩/校准元数据。Photoshop 通过临时 32 位 TIFF 打开结果。'
+      '实际输出：32 位线性浮点 DNG（已去马赛克）。保留母版；Camera Raw 打开后的阶段和位深由显影设置决定。',
+      '实际输出：16 位 TIFF（高级格式）。会量化并将负值截为 0；超范围高光统一缩放。保留完整校准浮点结果请选 DNG 或 32 位格式。',
+      '实际输出：32 位线性浮点 TIFF 母版，保留负值和超范围高光，带线性 ProPhoto RGB ICC。尚未拉伸；继续插件流程时先在「母版准备」创建独立后期副本。',
+      '实际输出：16 位 FITS（高级格式），BSCALE/BZERO保留正负范围但仍量化；Siril 1.4.2不能完整读取此缩放，请选32位FITS。PS打开未量化的临时32位TIFF。',
+      '实际输出：32 位浮点 FITS 科学母版，保留负值、超范围高光及色彩/校准元数据。仍未拉伸；PS通过临时32位TIFF打开结果，后续编辑另存副本，勿覆盖母版。'
     ];
-    $('stackFormatHint').textContent=hints[$('stackFormat').selectedIndex];
+    $('stackFormatHint').textContent=hints[selected];
   }
   $('stackFormat').addEventListener('change',formatHint);
+  for(const [id,index] of outputs)$(id).addEventListener('click',()=>{$('stackFormat').selectedIndex=index;formatHint();});
+  $('stackAdvancedOptions').addEventListener('click',()=>{
+    $('stackAdvancedSettings').classList.toggle('expanded');
+    $('stackAdvancedOptions').textContent='高级模式与格式 '+($('stackAdvancedSettings').classList.contains('expanded')?'▴':'▾');
+  });
   $('stackReferenceGround').addEventListener('change',()=>{
     $('stackReferenceGroundHint').textContent=$('stackReferenceGround').checked
       ? '执行时选择结果文件夹。保留所选主格式，另存32位天空/参考TIFF；PS打开两层，单帧参考地景默认隐藏。显示后用蒙版融合，参考层没有多帧降噪。'
@@ -142,6 +150,19 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
     const disk=$('stackMode').selectedIndex===1 || $('stackMode').selectedIndex===2;
     $('stackCache').textContent=selection?(disk?'此模式需要约 '+selection.cacheGB+' GB 磁盘缓存；内存按块使用。':'逐张累积；无需保存全部对齐帧。'):'';
   }
+  function modeHint() {
+    const selected=$('stackMode').selectedIndex;
+    for(const [id,index] of intents){$(id).classList.toggle('selected',selected===index);$(id).setAttribute('aria-pressed',String(selected===index));}
+    $('stackModeHint').textContent=[
+      '实际模式：均值。逐张累积，用于普通降噪，不自动排除偶发亮线。',
+      '当前高级模式：中位数。逐像素取中位数，使用磁盘缓存；可改回上方普通降噪。',
+      '实际模式：Sigma 裁剪均值。可能同时排除飞机、卫星和想保留的流星；效果依赖帧数与内容，少量素材优先均值，不替你决定拍摄目标或静默丢帧。',
+      '当前高级模式：最大值。仍先对齐星点，不是星轨合成；可改回上方普通降噪。',
+      '当前高级模式：最小值。逐像素取最小值，用于特殊目标；普通降噪优先均值。'
+    ][selected];
+    cacheHint();
+  }
+  for(const [id,index] of intents)$(id).addEventListener('click',()=>{$('stackMode').selectedIndex=index;modeHint();});
   function overlay() {
     if(!selection) {$('stackMask').removeAttribute('src');return;}
     const w=selection.width,h=selection.height;
@@ -172,8 +193,8 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
     const paths=entries.filter(e=>e.isFile && extensions.includes(e.name.split('.').pop().toLowerCase())).map(e=>e.nativePath);
     if(paths.length<2) throw new Error('请选择至少两张支持的照片；文件夹只读取当前层级。');
     await inspectSelection(paths,undefined,true);
-    $('stackFormat').selectedIndex=0;formatHint();
-    status('已读取中间基准帧。选择模式后执行堆栈。');
+    formatHint();
+    status('已读取中间基准帧。按堆栈目的和下一步选择后执行；已选模式与格式保留。');
   }
   $('stackReferenceChoice').addEventListener('change',()=>{
     if(!selection || $('stackReferenceChoice').selectedIndex===selection.reference)return;
@@ -204,7 +225,7 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
     const folder=await fs.getFolder();
     if(folder) await select(await folder.getEntries());
   }));
-  $('stackMode').addEventListener('change',cacheHint);
+  $('stackMode').addEventListener('change',modeHint);
   $('stackClearMask').addEventListener('click',()=>{strokes=[];drawing=null;overlay();});
   function position(event) {
     const rect=$('stackMask').getBoundingClientRect(), scale=Math.min(rect.width/selection.width,rect.height/selection.height);
@@ -293,7 +314,7 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
     },{commandName:'打开 Star Studio 堆栈结果'});
     status('已保存并打开 '+result.frames+' 帧堆栈 · '+result.seconds+' 秒。'+(format.startsWith('fits')?'\nFITS 已保存；Photoshop 通过临时 32 位 TIFF 打开完整浮点结果，后续编辑请另存 PSD/TIFF。':'')+(result.encoding.scale!==1?'\n16 位输出缩放比例：'+result.encoding.scale.toFixed(5)+'；见同名 JSON 记录。':'')+(result.encoding.clipped?'\n16 位 TIFF 将 '+result.encoding.clipped+' 个负通道值截为 0；保留完整浮点数据请使用 DNG 或 32 位格式。':'')+(result.calibration?.warnings?.length?'\n校准提示：'+result.calibration.warnings.join('\n'):'')+(result.encoding.quantizationStep?'\n16 位 FITS 量化步长：'+result.encoding.quantizationStep.toExponential(4)+'。':''));
   }));
-  calibrationHint();formatHint();updateActions();
+  calibrationHint();modeHint();formatHint();updateActions();
   return {updateActions};
 }
 module.exports={setup};

@@ -216,14 +216,20 @@
     <label id="stackLinearTiffLabel"><input id="stackLinearTiff" type="checkbox"> TIFF 已线性显影并去除黑电平</label>
     <div class="hint">校准支持原始 Bayer RAW 或上述线性 16/32 位 TIFF；JPEG、PNG、已去马赛克的 DNG 和 X-Trans RAW 暂不支持校准。未选择校准场时不受此限制。</div>
   </div>
-  <div class="row stackSettings"><div><label>堆栈模式</label><sp-picker id="stackMode"><sp-menu><sp-menu-item>均值（降噪推荐）</sp-menu-item><sp-menu-item>中位数</sp-menu-item><sp-menu-item>Sigma 裁剪均值</sp-menu-item><sp-menu-item>最大值</sp-menu-item><sp-menu-item>最小值</sp-menu-item></sp-menu></sp-picker></div><div><label>对齐场景</label><sp-picker id="stackScene"><sp-menu><sp-menu-item>纯星空</sp-menu-item><sp-menu-item>仅对齐天空（排除固定地景特征）</sp-menu-item></sp-menu></sp-picker></div></div>
+  <label>堆栈目的</label><div class="row"><button id="stackMeanIntent" class="purposeChoice">普通降噪</button><button id="stackRejectIntent" class="purposeChoice">排除偶发亮线 / 异常像素</button></div>
+  <label>对齐场景</label><sp-picker id="stackScene"><sp-menu><sp-menu-item>纯星空</sp-menu-item><sp-menu-item>仅对齐天空（排除固定地景特征）</sp-menu-item></sp-menu></sp-picker>
+  <div id="stackModeHint" class="hint">实际模式：均值。逐张累积，用于普通降噪。</div>
   <div id="stackMaskEditor"><img id="stackReference"><img id="stackMask"></div>
   <div class="row"><label><input type="checkbox" id="stackPaint"> 画笔排除对齐区域</label><span>笔刷</span><input id="stackBrush" type="range" min="10" max="160" value="60"><button id="stackClearMask">清除蒙版</button></div>
   <div class="hint">地景模式和红色蒙版仅排除对齐特征，不删除像素，也不保留清晰地景。整张照片随天空对齐，地景可能拖花。</div>
   <label class="processCompare"><input id="stackReferenceGround" type="checkbox"> 同时保留参考地景，创建天空与地景两层</label>
   <div id="stackReferenceGroundHint" class="hint">可选保留中间单帧供PS蒙版融合；参考地景没有多帧降噪，也不会自动融合地平线。</div>
-  <div class="row stackSettings"><div><label>保存格式</label><sp-picker id="stackFormat"><sp-menu><sp-menu-item>DNG（32 位线性浮点，默认）</sp-menu-item><sp-menu-item>16 位 TIFF</sp-menu-item><sp-menu-item>32 位浮点 TIFF</sp-menu-item><sp-menu-item>16 位 FITS（缩放整数）</sp-menu-item><sp-menu-item>32 位浮点 FITS</sp-menu-item></sp-menu></sp-picker></div></div>
+  <label>堆栈后下一步</label><div class="row"><button id="stackRawGoal" class="purposeChoice">Camera Raw 显影</button><button id="stackPluginGoal" class="purposeChoice">插件继续处理</button><button id="stackAstroGoal" class="purposeChoice">Siril / 天文软件</button></div>
   <div id="stackFormatHint" class="hint">DNG 保留 32 位浮点；Photoshop 打开位深由 Camera Raw 设置决定。</div>
+  <button id="stackAdvancedOptions" class="disclosure">高级模式与格式 ▾</button>
+  <div id="stackAdvancedSettings" class="collapsed">
+    <div class="row stackSettings"><div><label>堆栈模式</label><sp-picker id="stackMode"><sp-menu><sp-menu-item>均值</sp-menu-item><sp-menu-item>中位数</sp-menu-item><sp-menu-item>Sigma 裁剪均值</sp-menu-item><sp-menu-item>最大值</sp-menu-item><sp-menu-item>最小值</sp-menu-item></sp-menu></sp-picker></div><div><label>保存格式</label><sp-picker id="stackFormat"><sp-menu><sp-menu-item>DNG（32位线性浮点）</sp-menu-item><sp-menu-item>16位TIFF</sp-menu-item><sp-menu-item>32位浮点TIFF</sp-menu-item><sp-menu-item>16位FITS（缩放整数）</sp-menu-item><sp-menu-item>32位浮点FITS</sp-menu-item></sp-menu></sp-picker></div></div>
+  </div>
   <div id="stackCache" class="muted"></div>
   <div class="row"><button id="stackExecute" class="primary execute">执行堆栈并保存…</button><button id="stackCancel" disabled>取消</button></div>
   <button id="stackQualityOptions" class="disclosure">配准与覆盖报告 ▾</button>

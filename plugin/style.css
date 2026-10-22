@@ -19,6 +19,8 @@ section { margin:8px 0; padding:10px; border:1px solid #505050; border-radius:6p
 .row > * { margin-right:7px; } .row > sp-picker { flex:1; }
 button { border:1px solid #606060; background:#393939; color:#eee; padding:3px 8px; height:27px; min-height:0; margin:0; border-radius:4px; font-size:12px; }
 button.primary { background:#1768ac; border-color:#388bd3; }
+button.purposeChoice { flex:1; height:32px; }
+button.purposeChoice.selected { background:#1768ac; border-color:#388bd3; }
 button:disabled { opacity:.45; }
 input[type=text] { flex:1; padding:5px; background:#222; color:#eee; border:1px solid #555; }
 input[type=number] { width:78px; background:#222; color:#eee; border:1px solid #555; padding:4px; }

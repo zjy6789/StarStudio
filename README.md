@@ -8,7 +8,7 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前开发分支源码为 **0.18.0 开发中**，新增去星残留局部比较与独立手动修补副本；不自动补造内容。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
+> 当前开发分支源码为 **0.19.0 开发中**，堆栈按处理目的与下一步选择，原五种模式和五种格式保留在高级选项。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
 
 > 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 
@@ -132,16 +132,17 @@ StarNet++ 只需配置一次。它是外部程序，本项目不随包分发；�
 
 ## 从堆栈到星点加工
 
-面板按工作流排列：**堆栈 → 母版准备 → 星点分离 → 星点加工**。已有显影照片可跳过前两页。图层自动同步，星点和预览背景都由用户自己选择。星点加工通过 Photoshop 原生图层混合展示合成效果，不再提供独立的星点重混合页面。
+从线性素材开始可按 **堆栈 → 母版准备 → 线性提亮 → 按需背景校正 / 星点分离 → 星点加工** 继续；已有显影照片可以跳过堆栈、准备和初始提亮。各处理均可按目标跳过。图层自动同步，星点和预览背景都由用户自己选择。星点加工通过 Photoshop 原生图层混合展示合成效果，不再提供独立的星点重混合页面。
 
 ### 1. 堆栈
 
 在面板选择多张照片或文件夹；输入素材无需预先在 Photoshop 打开。
 
-- 模式包含均值、中间值、Sigma 裁剪均值、最大值、最小值。降噪通常从均值开始；最大/最小值用于特殊合成，不保证降噪。
+- 基础目的选择 **普通降噪**（均值）或 **排除偶发亮线 / 异常像素**（Sigma裁剪均值）。Sigma也可能排除希望保留的流星；效果依赖帧数和内容，少量素材优先均值，不按一个通用张数门槛替你决定。
+- **高级模式与格式** 保留均值、中位数、Sigma裁剪均值、最大值、最小值。展开/收起不改变选择；高级模式在基础区域明确显示，不伪装成普通降噪。最大值仍先对齐星点，不是星轨合成。
 - 素材按自然文件名排序，以排序后的中间一张为基准。纯星空直接配准；带地景模式排除检测到的跨帧固定特征，只对齐星空。
 - 固定地景检测不是语义分割。可用画笔涂抹山脊、灯光等区域，排除其参与星点匹配。蒙版不删除像素；地景随天空变换，允许拖影。
-- 选择输出位置及格式，完成后只在 Photoshop 打开堆栈结果。原始照片保持不变。
+- 在 **堆栈后下一步** 选择Camera Raw显影（默认32位线性DNG）、插件继续处理（32位线性TIFF母版，尚未拉伸）或Siril/天文软件（32位FITS）。16位格式仍可高级手选，量化/截断说明始终显示；更换素材不会重置你的明确选择。完成后只在Photoshop打开结果，原素材不打开、不改写。[选择与验证边界](docs/STACK_INTENT.md)
 - 展开 **校准场（可选）**，分别选择暗场、平场、偏置场的多张文件或文件夹，可任意清除；较长曝光平场可增加匹配的平暗场。全部不选时使用原有流程。暗场可以单独使用；平场先去偏置或匹配平暗场，未提供时 Bayer RAW 使用自带黑电平近似。暗场不自动缩放，需匹配曝光、ISO/增益与温度。[组合与拍摄要求](docs/CALIBRATION.md#可选组合与依赖)
 
 | 输出格式 | 信息与用途 |
