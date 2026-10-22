@@ -113,6 +113,12 @@ class Store:
                         from .stack_crop import crop_stack
                         job["message"] = "校验母版并保存裁剪副本…"
                         job["result"] = crop_stack(request,progress,lambda:job.get("cancel",False))
+                    elif operation in ("fitsInspect", "fitsImport"):
+                        from .fits_import import inspect_fits, import_fits
+                        job["message"] = "检查单张FITS数据…" if operation == "fitsInspect" else "保存独立32位线性TIFF…"
+                        canceled = lambda: job.get("cancel", False)
+                        job["result"] = (inspect_fits(request, progress, canceled) if operation == "fitsInspect"
+                                         else import_fits(request, progress, canceled))
                     elif operation in ("prepareInspect", "prepareLinear"):
                         from .linear_preparation import inspect_master, prepare_master
                         job["message"] = "检查线性母版…" if operation == "prepareInspect" else "创建独立的32位范围准备副本…"
@@ -374,7 +380,7 @@ class Store:
                         raise ValueError("未知操作")
                     job.update(state="done", progress=1)
             except Exception as e:
-                if operation in ("denoiseFit", "denoiseRender", "colorFit", "colorRender", "maskGenerate", "maskSave", "stackCrop", "processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchRender", "stretchSave") and job.get("cancel"):
+                if operation in ("fitsInspect", "fitsImport", "denoiseFit", "denoiseRender", "colorFit", "colorRender", "maskGenerate", "maskSave", "stackCrop", "processStars", "prepareInspect", "prepareLinear", "backgroundFit", "backgroundRender", "stretchInspect", "stretchRender", "stretchSave") and job.get("cancel"):
                     job["state"] = "canceled"
                 else:
                     if operation == "stack" and getattr(e,"failed_file",None):

@@ -8,6 +8,7 @@ function panel() {
   const info={path:'D:\\fixtures\\master.tif',width:6000,height:4000,profile:'Star Studio Linear ProPhoto RGB',
     fingerprint:{bytes:288000000,mtimeNs:'1792323487123456789'},mapping:{offset:-.125,scale:8},stats:{min:-.125,max:4,negativeChannels:3,aboveOneChannels:8},temporaryGB:.536};
   const h={get,calls,file:file('master.tif'),saved:file('copy.tif'),info,failure:null,gate:null,busy:false,sameDocument:false,openError:null};
+  h.fitsInfo={...info,color:'mono',rounding:{changedChannels:0,maxAbsError:0}};
   const original={id:7,title:'Existing work'};
   const doc={id:8,bitsPerChannel:32,mode:'RGB',width:6000,height:4000,colorProfileName:info.profile,closeWithoutSaving:async()=>{calls.closed.push(doc.id);host.app.documents=host.app.documents.filter(d=>d.id!==doc.id);}};
   h.doc=doc;
@@ -25,7 +26,7 @@ function panel() {
     run:async action=>{h.busy=true;h.ui.updateActions(true);try{return await action();}finally{h.busy=false;h.ui.updateActions();}},
     api:async(...args)=>{calls.api.push(args);return {};},status:(message,error)=>calls.status.push({message,error}),onOpened:doc=>calls.opened.push(doc.id),
     job:async(request,started)=>{calls.jobs.push(plain(request));started('job'+calls.jobs.length);if(h.gate)await h.gate;if(h.failure)throw h.failure;
-      return request.op==='prepareInspect'?plain(info):{path:h.saved.nativePath,width:info.width,height:info.height,profile:info.profile,metadata:{rounding:{maxAbsError:1e-8,changedChannels:15}}};}
+      return request.op==='fitsInspect'?plain(h.fitsInfo):request.op==='prepareInspect'?plain(info):{path:h.saved.nativePath,width:info.width,height:info.height,profile:info.profile,metadata:{rounding:{maxAbsError:1e-8,changedChannels:15}}};}
   });
   h.emit=(id,event='click')=>get(id).listeners[event]?.();
   h.select=()=>h.emit('prepareChoose');
@@ -92,4 +93,46 @@ test('cancellation is available during a pending file task and controls recover'
   await h.emit('prepareCancel');assert.equal(h.calls.api[0][0],'/jobs/job1');assert.equal(h.calls.api[0][3],'DELETE');
   h.failure=new Error('Canceled');resolve();await assert.rejects(pending,/Canceled/);
   assert.equal(h.get('prepareChoose').disabled,false);assert.equal(h.get('prepareCancel').disabled,true);
+});
+
+test('FITS import explicitly checks data and confirmations then hands off to the original preparation',async()=>{
+  const h=panel();h.file=file('linear.fits');
+  assert.equal(h.calls.jobs.length,0);assert.equal(h.get('fitsImport').disabled,true);
+  await h.emit('fitsChoose');assert.equal(h.calls.jobs.length,0);await h.emit('fitsCheck');
+  assert.deepEqual(h.calls.jobs[0],{op:'fitsInspect',path:h.file.nativePath,color:'unknown'});
+  assert.equal(h.get('fitsImport').disabled,true);assert.equal(h.calls.open.length,0);
+  h.get('fitsConfirmed').checked=true;await h.emit('fitsConfirmed','change');
+  assert.equal(h.get('fitsImport').disabled,false);await h.emit('fitsImport');
+  assert.equal(h.calls.save[0].name,'linear_linear_import.tif');assert.equal(h.calls.open.length,0);
+  assert.deepEqual(h.calls.jobs[1],{op:'fitsImport',path:h.file.nativePath,output:h.saved.nativePath,color:'unknown',
+    fingerprint:h.info.fingerprint,confirmedLinear:true,acceptRounding:false});
+  assert.equal(h.get('prepareUseLast').disabled,false);await h.emit('prepareUseLast');
+  assert.equal(h.calls.jobs[2].op,'prepareInspect');assert.equal(h.calls.jobs[2].path,h.saved.nativePath);
+});
+
+test('FITS color changes invalidate inspection and require fresh confirmation and rounding acceptance',async()=>{
+  const h=panel();h.file=file('rgb.fit');h.fitsInfo.color='srgb';h.fitsInfo.rounding={changedChannels:90,maxAbsError:1e-8};
+  h.get('fitsColor').selectedIndex=2;await h.emit('fitsChoose');await h.emit('fitsCheck');
+  h.get('fitsConfirmed').checked=true;await h.emit('fitsConfirmed','change');
+  assert.equal(h.get('fitsImport').disabled,true);await assert.rejects(h.emit('fitsImport'),/舍入/);
+  h.get('fitsRounding').checked=true;await h.emit('fitsRounding','change');assert.equal(h.get('fitsImport').disabled,false);
+  h.get('fitsColor').selectedIndex=1;await h.emit('fitsColor','change');
+  assert.equal(h.get('fitsImport').disabled,true);assert.equal(h.get('fitsConfirmed').checked,false);assert.equal(h.get('fitsRounding').checked,false);
+  await h.emit('fitsCheck');assert.equal(h.calls.jobs.at(-1).color,'prophoto');assert.equal(h.get('fitsImport').disabled,true);
+});
+
+test('invalid FITS replaces the selected source and cannot silently import the prior file',async()=>{
+  const h=panel();h.file=file('good.fits');await h.emit('fitsChoose');await h.emit('fitsCheck');h.get('fitsConfirmed').checked=true;
+  h.file=file('bad.fits');await h.emit('fitsChoose');h.failure=new Error('Missing color');await assert.rejects(h.emit('fitsCheck'),/Missing color/);
+  assert.equal(h.get('fitsImport').disabled,true);assert.equal(h.get('fitsConfirmed').checked,false);
+  h.failure=null;await h.emit('fitsCheck');assert.equal(h.calls.jobs.at(-1).path,h.file.nativePath);
+});
+
+test('FITS saving and native opening are separate and reuse the strict RGB32 ICC check',async()=>{
+  const h=panel();h.file=file('master.fts');await h.emit('fitsChoose');await h.emit('fitsCheck');h.get('fitsConfirmed').checked=true;
+  h.saved=null;await h.emit('fitsImport');assert.equal(h.calls.jobs.length,1);
+  h.saved=file('imported.tif');h.get('fitsOpen').checked=true;h.doc.colorProfileName='wrong';
+  await assert.rejects(h.emit('fitsImport'),/副本已保存.*不匹配/);
+  assert.deepEqual(h.calls.closed,[8]);assert.match(h.get('fitsSummary').textContent,/仍未拉伸/);
+  assert.equal(h.get('prepareUseLast').disabled,false);
 });

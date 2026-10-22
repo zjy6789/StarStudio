@@ -8,7 +8,7 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前开发分支源码为 **0.15.0 开发中**，新增带背景范围、原图比较与细节保护的内建浮点降噪。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
+> 当前开发分支源码为 **0.16.0 开发中**，新增单张线性FITS交接到32位TIFF，衔接既有母版准备。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
 
 > 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 
@@ -36,6 +36,15 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 4. 检查端点和舍入反馈后，点击 **保存并应用拉伸…**。结果另存为32位TIFF，并在独立PS文档中创建结果层和保留的原输入，一次撤销可恢复副本原输入。零强度仍标记线性。
 
 本页采用RGB联动modified asinh，仅支持本插件T4原样生成的线性ProPhoto RGB float32 TIFF，不自动重拉已显影照片或T6输出。合法负值/HDR原母版应先走T4范围准备，不能靠裁切塞入。出现新增黑白端点时会禁止应用，需降低强度或增加保护。没有新增端点仍不代表无损，原母版不能删除；T4零点抬升造成的颜色比例变化也不能由本页恢复。[完整输入、数学与回退约定](docs/PROTECTED_STRETCH.md)
+
+## 已有单张FITS堆栈时（开发功能）
+
+1. 在 **母版准备 → 导入一张FITS堆栈** 选择文件；灰度可以直接检查，三平面RGB须先确认来源软件使用的线性ProPhoto或线性sRGB空间，再点击 **检查数据**。
+2. 核对范围与舍入报告，确认尚未拉伸；发生float32舍入时需另行接受。不能确认颜色空间、相机原生RGB或未去拜耳素材，请先在来源天文软件中处理。
+3. 保存独立32位线性TIFF，可选择保存后打开。原FITS保留，负值和超1高光不裁切；灰度复制为中性RGB。此步没有拉伸或范围映射。
+4. 需要本插件提亮时，点击 **使用刚保存的32位母版**，先创建范围准备副本，再进入线性提亮。不要删除原FITS或把交接副本误认为已显影照片。
+
+只支持一幅灰度或三平面RGB，不做FITS序列管理。遇到空值、压缩或其他布局会解释原因；不会自动填零、旋转或裁剪。头卡片、来源哈希归档到TIFF描述，WCS仅存档。[数据与验证边界](docs/FITS_IMPORT.md)
 
 ## 保护星点或主体时（开发功能）
 

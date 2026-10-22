@@ -110,6 +110,19 @@
   <div class="hint">创建独立32位浮点副本，统一映射负值和高光，不做硬裁切或ICC转换。浮点映射仍可能舍入，将报告误差；副本不能代替原母版。这一步未拉伸，也不会自动去星。</div>
   <div class="row"><button id="prepareExecute" class="primary execute">创建后期副本并打开…</button><button id="prepareCancel" disabled>取消</button></div>
   <div id="prepareResult" class="hint"></div>
+  <button id="fitsOptions" class="disclosure">导入一张FITS堆栈 ▾</button>
+  <div id="fitsSettings" class="collapsed">
+    <div class="row"><button id="fitsChoose">选择FITS…</button><button id="fitsCheck">检查数据</button></div>
+    <label>RGB颜色解释（灰度自动转中性RGB）</label>
+    <sp-picker id="fitsColor"><sp-menu><sp-menu-item>尚未确认</sp-menu-item><sp-menu-item>我确认为线性ProPhoto RGB</sp-menu-item><sp-menu-item>我确认为线性sRGB</sp-menu-item></sp-menu></sp-picker>
+    <div class="hint">只支持单幅灰度或三平面RGB；不去拜耳、不自动拉伸。FITS的RGB不自带明确ICC，未知时先在来源软件确认或转换；不能把相机RGB直接指定为工作RGB。</div>
+    <div id="fitsSummary" class="hint">先选择一张未拉伸的FITS堆栈。</div>
+    <label><input id="fitsConfirmed" type="checkbox"> 我确认尚未拉伸，且RGB使用上方指定的线性空间</label>
+    <label><input id="fitsRounding" type="checkbox"> 我接受已报告的float32舍入，保留原FITS作为母版</label>
+    <label><input id="fitsOpen" type="checkbox" checked> 保存后在Photoshop中打开交接副本</label>
+    <button id="fitsImport">保存32位线性交接副本…</button>
+    <div class="muted">保留负值、高光和数组行顺序，不自动上下翻转。全部HDU头卡片与来源哈希写入TIFF描述，WCS仅存档。遇到空值会停止；不填零或自动裁剪。计算期间可用上方「取消」。</div>
+  </div>
 </section>
 <section id="separatePage" class="page" role="tabpanel">
   <label>源图层</label><sp-picker id="source" placeholder="选择源图层"><sp-menu></sp-menu></sp-picker>
