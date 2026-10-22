@@ -4,6 +4,7 @@ Bloom's quadratic soft knee is adapted from Keijiro Takahashi's MIT KinoBloom;
 see vendor/KINOBLOOM-LICENSE.txt. Pixels remain float32 throughout.
 """
 from pathlib import Path
+from time import monotonic
 import subprocess
 import tempfile
 import re
@@ -13,7 +14,7 @@ import cv2
 import numpy as np
 import tifffile
 from scipy.interpolate import PchipInterpolator
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter1d
 from scipy.signal import oaconvolve
 
 from .algorithms import color_count, validate_image
@@ -21,6 +22,11 @@ from .algorithms import color_count, validate_image
 from .paths import siril_path
 
 SIRIL = siril_path()
+
+
+def check_cancel(canceled):
+    if canceled():
+        raise InterruptedError('星点加工已取消')
 
 
 def number(options, key, default, low, high):
@@ -63,8 +69,9 @@ def curve_values(values, curve):
     return PchipInterpolator([0, .25, .5, .75, 1], anchors)(np.clip(values*2**exposure, 0, 1)).astype(np.float32)
 
 
-def round_stars(rgb, options, workdir, scale, cache=None):
+def round_stars(rgb, options, workdir, scale, cache=None, canceled=lambda: False):
     """Use the installed GPL Siril, changing only detected elongated-star regions."""
+    check_cancel(canceled)
     if not SIRIL.is_file():
         raise ValueError('彗差减少需要 Siril 1.4 或以上；本机未找到 siril-cli.exe。')
     radius = max(3, round(number(options, 'radius', 8, 3, 50)*scale))
@@ -87,11 +94,30 @@ def round_stars(rgb, options, workdir, scale, cache=None):
                     f'-maxR={roundness:g} -convergence=3 -gaussian -relax=on\n'
                     'findstar -out=stars.tsv\nsynthstar\nsavetif32 output\nclose\n')
         (folder/'process.ssf').write_text(commands, encoding='utf-8')
-        result = subprocess.run([str(SIRIL), '-o', '-d', str(folder), '-s', str(folder/'process.ssf')],
-                                capture_output=True, timeout=600,
-                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        log = result.stdout.decode('utf-8', errors='replace')
-        if result.returncode or not (folder/'output.tif').exists():
+        check_cancel(canceled)
+        command = [str(SIRIL), '-o', '-d', str(folder), '-s', str(folder/'process.ssf')]
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        deadline = monotonic()+600
+        try:
+            while True:
+                check_cancel(canceled)
+                remaining = deadline-monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, 600)
+                try:
+                    stdout, _ = process.communicate(timeout=min(.1, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+        except BaseException:
+            if process.poll() is None:
+                process.kill()
+            process.communicate()
+            raise
+        check_cancel(canceled)
+        log = stdout.decode('utf-8', errors='replace')
+        if process.returncode or not (folder/'output.tif').exists():
             detail = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', log)[-1200:]
             raise ValueError('Siril 未能重建星形；请降低检测阈值或调整搜索半径。\n'+detail)
         model = tifffile.imread(folder/'output.tif')
@@ -102,6 +128,7 @@ def round_stars(rgb, options, workdir, scale, cache=None):
         # Siril exports top-left image coordinates (verified against an asymmetric fixture).
         stars = []
         for line in (folder/'stars.tsv').read_text(encoding='utf-8').splitlines():
+            check_cancel(canceled)
             if not line or line.startswith('#'):
                 continue
             columns = line.split('\t')
@@ -111,6 +138,7 @@ def round_stars(rgb, options, workdir, scale, cache=None):
         mask = np.zeros(rgb.shape[:2], dtype=np.float32)
         h, w = mask.shape
         for x, y, fx, fy in stars:
+            check_cancel(canceled)
             radius = max(3., 2*max(fx, fy))
             x0, x1 = max(0, int(x-radius)), min(w, int(x+radius)+1)
             y0, y1 = max(0, int(y-radius)), min(h, int(y+radius)+1)
@@ -118,36 +146,45 @@ def round_stars(rgb, options, workdir, scale, cache=None):
             distance = np.hypot(xx-x, yy-y)/radius
             mask[y0:y1, x0:x1] = np.maximum(mask[y0:y1, x0:x1], 1-smooth((distance-.6)/.4))
         correction = (model-rgb)*mask[..., None]
+        check_cancel(canceled)
         if cache is not None:
             cache['coma'] = {'key': key, 'correction': correction, 'count': len(stars)}
         return rgb+correction*strength, len(stars)
 
 
-def gaussian_halo(source, sigma):
+def gaussian_halo(source, sigma, canceled=lambda: False):
     """Same finite reflected Gaussian as ndimage, with bounded FFT batches."""
-    if sigma < 32:
-        return gaussian_filter(source, (sigma, sigma, 0), mode='reflect')
-    radius = int(4*sigma+.5)
-    x = np.arange(-radius, radius+1, dtype=np.float64)
-    kernel = np.exp(-.5*x*x/(sigma*sigma))
-    kernel = (kernel/kernel.sum()).astype(np.float32)
+    check_cancel(canceled)
+    if sigma <= 1e-15:
+        return source.copy()
+    if sigma >= 32:
+        radius = int(4*sigma+.5)
+        x = np.arange(-radius, radius+1, dtype=np.float64)
+        kernel = np.exp(-.5*x*x/(sigma*sigma))
+        kernel = (kernel/kernel.sum()).astype(np.float32)
     result = source
+    output = np.empty_like(source)
     # Match ndimage's axis order and float32 intermediate storage. Symmetric
     # padding repeats the edge pixel, i.e. ndimage's half-sample reflect mode.
     for axis in (0, 1):
-        output = np.empty_like(source)
         other = 1-axis
-        padding = [(0, 0)]*3
-        padding[axis] = (radius, radius)
-        shape = [1]*3
-        shape[axis] = len(kernel)
+        if sigma >= 32:
+            padding = [(0, 0)]*3
+            padding[axis] = (radius, radius)
+            shape = [1]*3
+            shape[axis] = len(kernel)
         for start in range(0, result.shape[other], 128):
+            check_cancel(canceled)
             block = [slice(None)]*3
             block[other] = slice(start, start+128)
             block = tuple(block)
-            output[block] = oaconvolve(np.pad(result[block], padding, mode='symmetric'),
-                                      kernel.reshape(shape), mode='valid', axes=(axis,))
+            if sigma < 32:
+                gaussian_filter1d(result[block], sigma, axis=axis, output=output[block], mode='reflect')
+            else:
+                output[block] = oaconvolve(np.pad(result[block], padding, mode='symmetric'),
+                                          kernel.reshape(shape), mode='valid', axes=(axis,))
         result = output
+    check_cancel(canceled)
     return result
 
 
@@ -162,7 +199,9 @@ def eroded_luminance(lum, radius):
     return erode(low)*(1-(radius-low))+erode(low+1)*(radius-low)
 
 
-def process_stars(image, settings, workdir, scale=1., progress=lambda x: None, cache=None, encoding="black"):
+def process_stars(image, settings, workdir, scale=1., progress=lambda x: None, cache=None, encoding="black",
+                  canceled=lambda: False):
+    check_cancel(canceled)
     if encoding not in ('black', 'gray', 'signed'):
         raise ValueError('未知星点编码。')
     original = image
@@ -180,6 +219,7 @@ def process_stars(image, settings, workdir, scale=1., progress=lambda x: None, c
     validate_image(image)
     if encoding != 'black' and not any(p.get('enabled') for p in settings.values()):
         progress(1)
+        check_cancel(canceled)
         return original.copy(), {'reconstructedStars': 0}
     if not np.isfinite(scale) or not 0 < scale <= 1:
         raise ValueError('无效预览比例。')
@@ -191,8 +231,9 @@ def process_stars(image, settings, workdir, scale=1., progress=lambda x: None, c
     details = {'reconstructedStars': 0}
     coma = settings.get('coma', {})
     if coma.get('enabled') and number(coma, 'strength', .5, 0, 1) > 0:
-        rgb, details['reconstructedStars'] = round_stars(rgb, coma, workdir, scale, cache)
+        rgb, details['reconstructedStars'] = round_stars(rgb, coma, workdir, scale, cache, canceled)
     progress(.25)
+    check_cancel(canceled)
     reduction = settings.get('reduction', {})
     if reduction.get('enabled'):
         amount = number(reduction, 'strength', .35, 0, 1)
@@ -204,18 +245,21 @@ def process_stars(image, settings, workdir, scale=1., progress=lambda x: None, c
         target = lum+(eroded_luminance(lum, radius)-lum)*weight*amount
         rgb *= np.divide(target, lum, out=np.ones_like(lum), where=lum > 1e-12)[..., None]
     progress(.4)
+    check_cancel(canceled)
     curve = settings.get('curve', {})
     if curve.get('enabled'):
         lum = luminance(rgb)
         target = curve_values(lum, curve)
         rgb = bounded_color(rgb*np.divide(target, lum, out=np.ones_like(lum), where=lum > 1e-12)[..., None])
     progress(.55)
+    check_cancel(canceled)
     color = settings.get('color', {})
     if color.get('enabled') and n == 3:
         saturation = number(color, 'saturation', 1, 0, 2)
         protect = number(color, 'protect', .85, .01, 1)
         rgb = adjust_color(rgb, saturation, protect)
     progress(.7)
+    check_cancel(canceled)
     glow = settings.get('glow', {})
     if glow.get('enabled'):
         strength = number(glow, 'strength', 1, 0, 5)
@@ -245,14 +289,16 @@ def process_stars(image, settings, workdir, scale=1., progress=lambda x: None, c
             source = rgb*selected[..., None]
             if alpha is not None:
                 source *= alpha
-            halo = gaussian_halo(source, radius)*(1-spread)
+            halo = gaussian_halo(source, radius, canceled=canceled)*(1-spread)
             if spread:
-                halo += gaussian_halo(source, 3*radius)*spread
+                halo += gaussian_halo(source, 3*radius, canceled=canceled)*spread
+            check_cancel(canceled)
             if cache is not None:
                 cache['glow'] = {'key': key, 'halo': halo}
         # Soft screen-like blend avoids hard clipping original bright star cores.
         rgb += (1-rgb)*(-np.expm1(-strength*halo))
     progress(.95)
+    check_cancel(canceled)
     output = image.copy()
     output[..., :n] = np.where(visible[..., None], np.clip(rgb, 0, 1), image[..., :n])
     if correction is not None:
@@ -262,4 +308,5 @@ def process_stars(image, settings, workdir, scale=1., progress=lambda x: None, c
         # and all invisible source pixels, without blurring or clipping them.
         output[..., :n] = np.where(visible[..., None], encoded, original[..., :n])
     progress(1)
+    check_cancel(canceled)
     return output, details

@@ -1,4 +1,7 @@
 import time
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -174,9 +177,9 @@ def test_full_resolution_gaussian_matches_finite_reflected_filter(sigma, channel
 
 def test_glow_cache_reuses_strength_and_invalidates_upstream(tmp_path, monkeypatch):
     calls = []
-    def blur(source, sigma):
+    def blur(source, sigma, **kwargs):
         calls.append(sigma)
-        return gaussian_halo(source, sigma)
+        return gaussian_halo(source, sigma, **kwargs)
     monkeypatch.setattr('backend.star_processing.gaussian_halo', blur)
     image, cache = star_image(), {}
     settings = {'glow': dict(enabled=True, radius=12, lower=.3, strength=1)}
@@ -200,11 +203,11 @@ def test_glow_cache_reuses_strength_and_invalidates_upstream(tmp_path, monkeypat
 @pytest.mark.skipif(not SIRIL.is_file(), reason='Requires installed Siril 1.4+')
 def test_coma_cache_reuses_detection_for_strength(tmp_path, monkeypatch):
     from backend import star_processing
-    run, calls = star_processing.subprocess.run, []
+    popen, calls = star_processing.subprocess.Popen, []
     def tracked(*args, **kwargs):
         calls.append(args[0])
-        return run(*args, **kwargs)
-    monkeypatch.setattr(star_processing.subprocess, 'run', tracked)
+        return popen(*args, **kwargs)
+    monkeypatch.setattr(star_processing.subprocess, 'Popen', tracked)
     image, cache = star_image(), {}
     settings = {'coma': dict(enabled=True, strength=.3, radius=8, sigma=1, roundness=.9)}
     process_stars(image, settings, tmp_path, cache=cache)
@@ -265,3 +268,115 @@ def test_natural_control_starting_radius_depends_on_star_pixels_not_canvas_size(
     # Padding a photograph does not justify increasing its morphological radius.
     for patch in patches[1:]:
         np.testing.assert_array_equal(patch, patches[0])
+
+
+@pytest.mark.parametrize('sigma', [1e-16, .5, 12, 31.875])
+@pytest.mark.parametrize('channels', [1, 3])
+def test_batched_small_gaussian_is_bitwise_identical_on_strided_input(sigma, channels):
+    image = np.random.default_rng(81).random((271, 263, channels*2), dtype=np.float32)[..., ::2]
+    original = image.copy()
+    image[0, -1] = 1
+    original[0, -1] = 1
+    actual = gaussian_halo(image, sigma)
+    expected = gaussian_filter(image, (sigma, sigma, 0), mode='reflect')
+    np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(image, original)
+
+
+@pytest.mark.parametrize('sigma, operation', [(12, 'gaussian_filter1d'), (36, 'oaconvolve')])
+def test_cancel_glow_after_first_batch_stops_and_does_not_cache_partial_halo(tmp_path, monkeypatch, sigma, operation):
+    from backend import star_processing
+    real_filter = getattr(star_processing, operation)
+    calls = []
+    def interrupted(*args, **kwargs):
+        result = real_filter(*args, **kwargs)
+        calls.append(1)
+        return result
+    monkeypatch.setattr(star_processing, operation, interrupted)
+    image, cache = star_image(271), {}
+    original = image.copy()
+    settings = {'glow': dict(enabled=True, radius=sigma, lower=.01)}
+    with pytest.raises(InterruptedError, match='已取消'):
+        process_stars(image, settings, tmp_path, cache=cache, canceled=lambda: bool(calls))
+    assert len(calls) == 1
+    assert 'glow' not in cache
+    np.testing.assert_array_equal(image, original)
+
+
+@pytest.mark.parametrize('stage', [0, .25, .4, .55, .7, .95, 1])
+@pytest.mark.parametrize('encoding', ['black', 'gray', 'signed'])
+def test_processing_cancels_at_stages_and_preserves_source(tmp_path, stage, encoding):
+    image = star_image(72)
+    if encoding == 'signed':
+        image[..., :3] -= .1
+    original = image.copy()
+    reports = [0]
+    settings = {'curve': dict(enabled=True, midtones=.62), 'glow': dict(enabled=True, radius=1)}
+    with pytest.raises(InterruptedError, match='已取消'):
+        process_stars(image, settings, tmp_path, encoding=encoding, progress=reports.append,
+                      canceled=lambda: reports[-1] >= stage)
+    assert reports[-1] == stage
+    np.testing.assert_array_equal(image, original)
+
+
+@pytest.mark.parametrize('reason', ['cancel', 'timeout'])
+def test_siril_interruption_reaps_only_owned_child_and_cleans_temporary_files(tmp_path, monkeypatch, reason):
+    from backend import star_processing
+    monkeypatch.setattr(star_processing, 'SIRIL', Path(sys.executable))
+    canceled, calls = [], []
+    class Child:
+        returncode = None
+        def communicate(self, timeout=None):
+            calls.append(('communicate', timeout))
+            if timeout is not None:
+                canceled.append(True)
+                raise subprocess.TimeoutExpired('owned-siril', timeout)
+            return b'', b''
+        def poll(self):
+            return self.returncode
+        def kill(self):
+            calls.append(('kill',))
+            self.returncode = -1
+    child = Child()
+    monkeypatch.setattr(star_processing.subprocess, 'Popen', lambda *a, **k: child)
+    if reason == 'timeout':
+        times = iter([0, 601])
+        monkeypatch.setattr(star_processing, 'monotonic', lambda: next(times))
+    expected = InterruptedError if reason == 'cancel' else subprocess.TimeoutExpired
+    with pytest.raises(expected) as failure:
+        star_processing.round_stars(star_image(12)[..., :3], {}, tmp_path, 1,
+                                    canceled=lambda: bool(canceled))
+    if reason == 'timeout':
+        assert failure.value.timeout == 600
+    assert calls[-2:] == [('kill',), ('communicate', None)]
+    assert not list(tmp_path.glob('star-shape-*'))
+
+
+def test_cancel_siril_drains_both_pipes_and_reaps_real_owned_child(tmp_path, monkeypatch):
+    from backend import star_processing
+    monkeypatch.setattr(star_processing, 'SIRIL', Path(sys.executable))
+    popen, children = subprocess.Popen, []
+    marker = tmp_path/'pipes-drained'
+    def owned_child(command, **kwargs):
+        script = ('import sys,time; from pathlib import Path; '
+                  'sys.stdout.buffer.write(b"x"*200000); sys.stdout.flush(); '
+                  'sys.stderr.buffer.write(b"y"*200000); sys.stderr.flush(); '
+                  'Path(sys.argv[1]).touch(); time.sleep(10)')
+        child = popen([sys.executable, '-c', script, str(marker)], **kwargs)
+        children.append(child)
+        return child
+    monkeypatch.setattr(star_processing.subprocess, 'Popen', owned_child)
+    deadline = time.monotonic()+3
+    try:
+        with pytest.raises(InterruptedError, match='已取消'):
+            star_processing.round_stars(star_image(12)[..., :3], {}, tmp_path, 1,
+                                        canceled=lambda: marker.exists() or time.monotonic() >= deadline)
+        assert marker.is_file(), 'Both full pipes must be drained before cancellation'
+        assert len(children) == 1 and children[0].poll() is not None
+        assert children[0].stdout.closed and children[0].stderr.closed
+        assert not list(tmp_path.glob('star-shape-*'))
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.communicate()

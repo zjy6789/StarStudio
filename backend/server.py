@@ -321,6 +321,7 @@ class Store:
                             self.processing_cache.clear()
                             self.processing_cache["source"] = source
                         options = {"encoding": encoding} if encoding != "black" else {}
+                        options["canceled"] = lambda: job.get("cancel", False)
                         output, details = process_stars(self.get(request["image"]), request["settings"],
                                                        self.path, scale, progress, self.processing_cache, **options)
                         if job.get("cancel"):

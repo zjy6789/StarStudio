@@ -314,7 +314,7 @@ def test_canceled_running_processing_discards_result(tmp_path, monkeypatch):
     store = Store(tmp_path)
     key = store.save(np.full((8, 12, 3), .2, dtype=np.float32))
     started, finish = threading.Event(), threading.Event()
-    def process(image, settings, workdir, scale, progress, cache):
+    def process(image, settings, workdir, scale, progress, cache, canceled):
         started.set()
         assert finish.wait(3)
         return image.copy(), {"reconstructedStars": 0}
@@ -330,11 +330,39 @@ def test_canceled_running_processing_discards_result(tmp_path, monkeypatch):
     assert len(list(tmp_path.glob("*.npy"))) == 1
 
 
+def test_running_processing_cancellation_reaches_expensive_work_before_later_blurs(tmp_path, monkeypatch):
+    store = Store(tmp_path)
+    image = np.full((8, 12, 3), .2, dtype=np.float32)
+    key = store.save(image)
+    started, cancel_sent = threading.Event(), threading.Event()
+    obsolete = []
+    def blur(source, sigma, **kwargs):
+        started.set()
+        assert cancel_sent.wait(3)
+        if kwargs.get('canceled', lambda: False)():
+            raise InterruptedError('canceled inside blur')
+        obsolete.append(sigma)
+        return np.zeros_like(source)
+    monkeypatch.setattr('backend.star_processing.gaussian_halo', blur)
+    job_id = store.job(dict(op='processStars', image=key, settings={'glow': {'enabled': True}}))
+    assert started.wait(3)
+    store.jobs[job_id]['cancel'] = True
+    cancel_sent.set()
+    job = wait_for_job(store, job_id)
+    assert job['state'] == 'canceled' and 'result' not in job
+    assert not obsolete, 'Canceled work still completed old Gaussian passes'
+    assert 'glow' not in store.processing_cache
+    assert set(store.images) == {key}
+    np.testing.assert_array_equal(store.get(key), image)
+    following = wait_for_job(store, store.job(dict(op='processStars', image=key, settings={})))
+    assert following['state'] == 'done', following
+
+
 def test_processing_cache_tracks_one_source_and_releases_deleted_input(tmp_path, monkeypatch):
     store = Store(tmp_path)
     inputs = [store.save(np.full((8, 12, 3), value, dtype=np.float32)) for value in (.2, .4)]
     prior = []
-    def process(image, settings, workdir, scale, progress, cache):
+    def process(image, settings, workdir, scale, progress, cache, canceled):
         prior.append(cache.get("glow"))
         cache["glow"] = {"halo": image.copy()}
         return image.copy(), {"reconstructedStars": 0}
