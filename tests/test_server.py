@@ -125,6 +125,91 @@ def test_jobs_http_rejects_bad_bodies_and_recovers(tmp_path):
         server.shutdown(); server.server_close(); thread.join(timeout=3)
 
 
+def test_starnet_http_endpoints_authenticate_before_inspecting_paths(tmp_path, monkeypatch):
+    calls = []
+    def inspect(path):
+        calls.append(('info', path))
+        return {'installation': {'ready': False, 'missing': ['StarNet2_weights.onnx']}}
+    def discover(current):
+        calls.append(('discover', current))
+        return {'executable': None}
+    monkeypatch.setattr('backend.server.starnet_info', inspect)
+    monkeypatch.setattr('backend.starnet_install.discover_starnet', discover)
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.token = 'test-token'
+    server.store = Store(tmp_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    def post(path, body, token=None):
+        headers = {'Content-Type': 'application/json'}
+        if token is not None:
+            headers['X-Star-Token'] = token
+        request = urllib.request.Request(f'http://127.0.0.1:{server.server_port}/{path}',
+                                         data=body, headers=headers)
+        return opener.open(request, timeout=3)
+    try:
+        for path in ['starnet-info', 'starnet-discover']:
+            for token in [None, 'incorrect-token']:
+                with pytest.raises(urllib.error.HTTPError) as error:
+                    post(path, b'{invalid', token)
+                assert error.value.code == 403
+                assert json.load(error.value)['error']
+        assert calls == []
+        with post('starnet-info', b'{"executable":"test-starnet2.exe"}', server.token) as response:
+            assert json.load(response)['installation']['ready'] is False
+        with post('starnet-discover', b'{"current":"test-starnet++.exe"}', server.token) as response:
+            assert json.load(response) == {'executable': None}
+        assert calls == [('info', 'test-starnet2.exe'), ('discover', 'test-starnet++.exe')]
+        assert server.store.jobs == {}
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+
+def test_starnet_http_reports_incomplete_installation_and_preserves_current_cpu(tmp_path, monkeypatch):
+    modern = tmp_path / 'modern'
+    modern.mkdir()
+    exe = modern / 'starnet2.exe'
+    exe.write_bytes(b'test executable')
+    (modern / 'LICENSE.txt').write_text('Test license', encoding='utf-8')
+    cpu = tmp_path / 'cpu'
+    cpu.mkdir()
+    current = cpu / 'starnet++.exe'
+    current.write_bytes(b'test executable')
+    (cpu / 'starnet2_weights.pb').write_bytes(b'test weights')
+    monkeypatch.setattr('backend.starnet_install.known_locations', lambda: [exe])
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.token = 'test-token'
+    server.store = Store(tmp_path / 'jobs')
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    def post(path, body):
+        request = urllib.request.Request(f'http://127.0.0.1:{server.server_port}/{path}',
+            data=json.dumps(body).encode(), headers={'X-Star-Token': server.token, 'Content-Type': 'application/json'})
+        return opener.open(request, timeout=3)
+    try:
+        with post('starnet-info', {'executable': str(exe)}) as response:
+            info = json.load(response)
+        assert info['installation']['ready'] is False
+        assert info['installation']['missing'] == ['StarNet2_weights.onnx']
+        assert info['license'] == 'Test license'
+        assert len(info['license_sha256']) == 64
+        with post('starnet-discover', {'current': str(current)}) as response:
+            selected = json.load(response)
+        assert selected['executable'] == str(current)
+        assert selected['modern'] is False
+        assert selected['preserved'] is True
+        assert selected['installation']['ready'] is True
+        with pytest.raises(urllib.error.HTTPError) as error:
+            post('starnet-info', {'executable': str(tmp_path / 'missing.exe')})
+        assert error.value.code == 400
+        assert json.load(error.value)['error']
+        assert server.store.jobs == {}
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+
 def test_extract_preserved_model_runs_engine_once_and_returns_signed_values(tmp_path, monkeypatch):
     calls = []
     predicted = np.array([[[.3, .2, .4], [.1, .3, .2]]], dtype=np.float32)

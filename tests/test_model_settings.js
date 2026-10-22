@@ -10,7 +10,7 @@ function panel(saved={}) {
     return elements.get(id);
   };
   get('executable').value='D:\\latest\\starnet2.exe';
-  let written,info={modern:true,license:'Full terms',license_sha256:'revision-1'};
+  let written,info={modern:true,license:'Full terms',license_sha256:'revision-1',installation:{ready:true,modelPath:'model'}};
   const settings={name:'model-settings.json',read:async()=>JSON.stringify(saved),write:async value=>{written=JSON.parse(value);}};
   const context={document:{getElementById:get},console,module:{exports:{}},fetch:async()=>({ok:true,json:async()=>info}),
     require:name=>name==='./bridge.json'?{url:'http://127.0.0.1:8765',starnet:get('executable').value}:
@@ -56,7 +56,7 @@ test('384 selection survives restart, and legacy CPU rejects it before reading P
   assert.equal(ui.get('stride').selectedIndex,3);
   await ui.saveModelSettings();
   assert.equal(ui.written().stride,3);
-  ui.setInfo({modern:false,product:'StarNet++ v2'});
+  ui.setInfo({modern:false,product:'StarNet++ v2',installation:{ready:true,modelPath:'model'}});
   await assert.rejects(ui.extract(),/384.*新版/);
 });
 

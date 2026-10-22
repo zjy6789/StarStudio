@@ -95,7 +95,7 @@ function setup({run,api,job,status,onSaved=()=>{},onLayeredOpened=()=>{}}) {
     if(calibration.darkflat.length && !calibration.flat.length) notes.push('平暗场需同时选择平场。');
     if(calibration.flat.length && !calibration.bias.length && !calibration.darkflat.length) notes.push('未选偏置/平暗场：RAW 使用自带黑电平；线性 TIFF 需确认已去黑电平。');
     if(calibration.dark.length) notes.push('暗场不自动缩放，请匹配亮场曝光、ISO/增益和温度。');
-    $('stackCalibrationHint').textContent=notes.join(' ') || '按需选择，未选校准场时使用原有堆栈流程。主校准场在处理时合成，不会打开到 Photoshop。';
+    $('stackCalibrationHint').textContent='没有校准场也可继续；未用对应暗场/平场时，热像素、暗电流、暗角或灰尘印迹可能残留。'+(notes.length?' '+notes.join(' '):' 主校准场在处理时合成，不会打开到Photoshop。')+(calibration.dark.length?' 温度由用户核对，不宣称自动匹配。':'');
   }
   $('stackCalibrationOptions').addEventListener('click',()=>{
     $('stackCalibrationSettings').classList.toggle('expanded');calibrationHint();

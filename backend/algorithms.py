@@ -1,6 +1,5 @@
 """Float image pipeline. GHS mathematics adapted from Siril (GPL-3.0-or-later)."""
 from pathlib import Path
-import hashlib
 import json
 import subprocess
 import threading
@@ -9,6 +8,7 @@ import numpy as np
 import tifffile
 
 from .paths import ROOT
+from .starnet_install import starnet_info
 
 
 def validate_image(image):
@@ -22,27 +22,14 @@ def color_count(image):
     return 3 if image.shape[2] >= 3 else 1
 
 
-def starnet_info(executable):
-    exe = Path(executable).resolve()
-    if not exe.is_file():
-        raise ValueError(f"找不到 StarNet: {exe}")
-    if exe.stem.lower() == "starnet2":
-        license_file = exe.parent / "LICENSE.txt"
-        terms = license_file.read_bytes()
-        return {"modern": True, "product": "StarNet2", "minimum_size": 512,
-                "license": terms.decode("utf-8-sig"),
-                "license_sha256": hashlib.sha256(terms).hexdigest()}
-    if exe.stem.lower() == "starnet++":
-        return {"modern": False, "product": "StarNet++ v2", "minimum_size": 256}
-    raise ValueError("请选择官方 starnet2.exe 或旧版 starnet++.exe，保留原始文件名。")
-
-
 def starnet(image, workdir, executable, stride=256, progress=lambda x: None, license_sha256=None,
             report=lambda state: None):
     started = time.perf_counter()
     report({"message": "准备引擎输入…"})
     info = starnet_info(executable)
     exe = Path(executable).resolve()
+    if not info['installation']['ready']:
+        raise ValueError('StarNet缺少文件：'+'、'.join(info['installation']['missing'])+'；请完整解压官方包后重试。')
     if info["modern"] and license_sha256 != info["license_sha256"]:
         raise ValueError("请在星点提取模型中阅读并同意当前 StarNet2 许可后再执行。")
     validate_image(image)

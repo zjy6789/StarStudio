@@ -24,7 +24,7 @@ for(const size of [8,16,32]) for(const preserve of [false,true]) {
       const route=new URL(url).pathname;
       const body=options.body?JSON.parse(options.body):null;
       let response={};
-      if(route==='/starnet-info') response={modern:false};
+      if(route==='/starnet-info') response={modern:false,installation:{ready:true,modelPath:'model'}};
       if(route==='/jobs') {requests.push(body);response={id:'job'};}
       if(route==='/jobs/job') response={state:'done',progress:1,result:{background:'bg',stars:'stars',provider:'CPU',starEncoding:size===32?'signed':'gray'}};
       if(options.method==='DELETE') deleted.push(route);

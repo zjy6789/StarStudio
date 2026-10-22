@@ -24,13 +24,19 @@ class FakeProcess:
         self.killed = True
 
 
+def make_engine(folder, modern=False):
+    exe = folder / ('starnet2.exe' if modern else 'starnet++.exe')
+    exe.write_bytes(b'test executable')
+    (folder / ('StarNet2_weights.onnx' if modern else 'starnet2_weights.pb')).write_bytes(b'test weights')
+    return exe
+
+
 @pytest.mark.parametrize('channels', [1, 3])
 @pytest.mark.parametrize('modern', [False, True])
 def test_starnet_interfaces_and_precision(tmp_path, monkeypatch, channels, modern):
     engine = tmp_path / 'engine'
     engine.mkdir()
-    exe = engine / ('starnet2.exe' if modern else 'starnet++.exe')
-    exe.touch()
+    exe = make_engine(engine, modern)
     if modern:
         (engine / 'LICENSE.txt').write_text('Test license revision', encoding='utf-8')
     info = starnet_info(exe)
@@ -67,8 +73,7 @@ def test_starnet_interfaces_and_precision(tmp_path, monkeypatch, channels, moder
 
 
 def test_revised_license_needs_new_acceptance(tmp_path, monkeypatch):
-    exe = tmp_path / 'starnet2.exe'
-    exe.touch()
+    exe = make_engine(tmp_path, True)
     terms = tmp_path / 'LICENSE.txt'
     terms.write_text('First revision')
     accepted = starnet_info(exe)['license_sha256']
@@ -76,6 +81,8 @@ def test_revised_license_needs_new_acceptance(tmp_path, monkeypatch):
     def unexpected(*args, **kwargs):
         pytest.fail('Must not run before acceptance')
     monkeypatch.setattr('backend.algorithms.subprocess.Popen', unexpected)
+    monkeypatch.setattr('backend.algorithms.np.pad', unexpected)
+    monkeypatch.setattr('astropy.io.fits.writeto', unexpected)
     for value in [None, accepted]:
         with pytest.raises(ValueError, match='许可'):
             starnet(np.ones((4, 4, 1), dtype=np.float32), tmp_path, exe, license_sha256=value)
@@ -83,8 +90,7 @@ def test_revised_license_needs_new_acceptance(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('failure', ['exit', 'missing', 'shape', 'nonfinite', 'range', 'depth'])
 def test_invalid_modern_outputs_are_rejected(tmp_path, monkeypatch, failure):
-    exe = tmp_path / 'starnet2.exe'
-    exe.touch()
+    exe = make_engine(tmp_path, True)
     (tmp_path / 'LICENSE.txt').write_text('Test license')
     accepted = starnet_info(exe)['license_sha256']
     def execute(command, **options):
@@ -102,8 +108,7 @@ def test_invalid_modern_outputs_are_rejected(tmp_path, monkeypatch, failure):
 
 
 def test_modern_progress_provider_and_high_stride_preserve_pixels(tmp_path, monkeypatch):
-    exe = tmp_path / 'starnet2.exe'
-    exe.touch()
+    exe = make_engine(tmp_path, True)
     (tmp_path / 'LICENSE.txt').write_text('Test license')
     image = np.full((512, 700, 3), .25, dtype=np.float32)
     before = image.copy()
@@ -128,8 +133,7 @@ def test_modern_progress_provider_and_high_stride_preserve_pixels(tmp_path, monk
 
 
 def test_legacy_rejects_384_before_start(tmp_path, monkeypatch):
-    exe = tmp_path / 'starnet++.exe'
-    exe.touch()
+    exe = make_engine(tmp_path)
     def unexpected(*args, **kwargs):
         pytest.fail('Unsupported stride must not start engine')
     monkeypatch.setattr('backend.algorithms.subprocess.Popen', unexpected)
@@ -138,8 +142,7 @@ def test_legacy_rejects_384_before_start(tmp_path, monkeypatch):
 
 
 def test_timeout_terminates_engine_and_drains_log(tmp_path, monkeypatch):
-    exe = tmp_path / 'starnet++.exe'
-    exe.touch()
+    exe = make_engine(tmp_path)
     process = FakeProcess(lines='engine timed out')
     def wait(timeout=None):
         if timeout:
@@ -151,3 +154,33 @@ def test_timeout_terminates_engine_and_drains_log(tmp_path, monkeypatch):
         starnet(np.zeros((512, 512, 1), dtype=np.float32), tmp_path, exe)
     assert process.killed and process.stdout.closed
     assert (tmp_path / 'starnet.log').read_text() == 'engine timed out'
+
+
+@pytest.mark.parametrize('modern, failure', [
+    (False, 'missing_model'), (False, 'empty_model'), (False, 'empty_executable'),
+    (True, 'missing_model'), (True, 'empty_model'), (True, 'empty_executable'),
+    (True, 'missing_license'), (True, 'empty_license'),
+])
+def test_incomplete_installation_is_rejected_before_preparing_pixels(tmp_path, monkeypatch, modern, failure):
+    exe = make_engine(tmp_path, modern)
+    if modern:
+        (tmp_path / 'LICENSE.txt').write_text('Test license', encoding='utf-8')
+    accepted = starnet_info(exe).get('license_sha256')
+    target = exe if failure.endswith('executable') else tmp_path / (
+        'LICENSE.txt' if failure.endswith('license') else
+        'StarNet2_weights.onnx' if modern else 'starnet2_weights.pb')
+    if failure.startswith('missing'):
+        target.unlink()
+    else:
+        target.write_bytes(b'')
+    def unexpected(*args, **kwargs):
+        pytest.fail('Incomplete installation must be rejected before preparing pixels or starting inference')
+    monkeypatch.setattr('backend.algorithms.np.pad', unexpected)
+    monkeypatch.setattr('backend.algorithms.tifffile.imwrite', unexpected)
+    monkeypatch.setattr('astropy.io.fits.writeto', unexpected)
+    monkeypatch.setattr('backend.algorithms.subprocess.Popen', unexpected)
+    with pytest.raises(ValueError, match='StarNet'):
+        starnet(np.ones((4, 4, 1), dtype=np.float32), tmp_path, exe, license_sha256=accepted)
+    assert not (tmp_path / 'input.fits').exists()
+    assert not (tmp_path / 'input.tif').exists()
+    assert not (tmp_path / 'starnet.log').exists()

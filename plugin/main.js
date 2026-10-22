@@ -58,11 +58,16 @@ function inputState() {
     : '天空对齐不保护地景清晰度；地景精修仍可使用 Photoshop 蒙版。';
 }
 function modelState(error='') {
-  $('modelState').textContent=!modelExecutable()?'StarNet 未配置；仍可堆栈和加工已有星点层。'
-    : error?'StarNet 无法就绪：'+error+'。请完整解压官方 CLI 并重新选择程序；其他工具仍可使用。'
-    : !modelInfo?'StarNet 尚未检查；选择程序后自动检查。'
-    : modelInfo.modern&&!acceptedLicenses.includes(modelInfo.license_sha256)?'StarNet 程序已找到，许可待确认。展开模型设置，查看并同意许可。'
-    : 'StarNet 程序与许可已就绪；模型及设备将在实际执行时由引擎检查。';
+  let message;
+  if(!modelExecutable())message='StarNet 未配置；仍可堆栈和加工已有星点层。';
+  else if(error)message=(error.startsWith('找不到 StarNet')?'StarNet 缺少程序：':'StarNet 无法就绪：')+error+'。请完整解压官方 CLI 并重新选择程序；其他工具仍可使用。';
+  else if(!modelInfo)message='StarNet 尚未检查；选择程序后自动检查。';
+  else if(!modelInfo.installation)message='后台未提供模型文件检查；请更新处理组件后重开面板。堆栈等功能仍可使用。';
+  else if(!modelInfo.installation.modelPath)message='StarNet 缺少模型文件：'+(modelInfo.modern?'StarNet2_weights.onnx':'starnet2_weights.pb')+'。请完整解压官方包，不要仅复制EXE。';
+  else if(!modelInfo.installation.ready)message='StarNet 缺少许可文件 LICENSE.txt；请保留原发行包许可，完整解压后重新检查。';
+  else if(modelInfo.modern&&!acceptedLicenses.includes(modelInfo.license_sha256))message='StarNet 程序/模型文件已找到，许可待确认。展开模型设置，查看并同意许可。';
+  else message='StarNet 程序/模型文件检查就绪'+(modelInfo.modern?'，许可已接受':'（CPU兼容版）')+'；运行库及GPU/CPU以实际推理反馈为准。';
+  $('modelState').textContent=message;
 }
 async function checkModel() {
   const executable=modelExecutable();modelInfo=null;modelState();
@@ -72,6 +77,20 @@ async function checkModel() {
     if(modelExecutable()!==executable) return;
     modelInfo=info;modelState();
   } catch(e) {if(modelExecutable()===executable) modelState(e.message);}
+}
+async function findModel(automatic=false) {
+  const before=modelExecutable();
+  const candidate=await api('/starnet-discover',{current:before});
+  if(modelExecutable()!==before)return;
+  if(!candidate.executable) {
+    if(!automatic)status('已知位置没有通过模型/许可文件检查的候选；可完整解压官方CLI后手动选择程序。');
+    return;
+  }
+  if(candidate.installation?.ready!==true)throw new Error('后台未返回已通过文件检查的候选；未修改当前路径。');
+  $('executable').value=candidate.executable;
+  modelInfo=null;$('modelLicense').classList.remove('expanded');
+  await checkModel();if(settingsFile)await saveModelSettings();
+  if(!automatic)status((candidate.preserved?'已保留当前程序路径':'已填写通过文件检查的候选路径')+'；不代表已验证推理或GPU。新版许可仍需明确确认。');
 }
 
 function status(message, error=false) { $('status').textContent=message; $('status').className=error?'error':''; }
@@ -160,6 +179,7 @@ function updateActions() {
   for(const id of ['useSeparation','useLastSeparation','viewStarless']) $(id).disabled=busy || !pair;
   $('restoreMatchedBlend').disabled=busy || value('processSource')==null;
   $('extract').disabled=busy || !layerList.length;
+  $('acceptModelLicense').disabled=busy || !modelInfo?.license_sha256;
   const float=doc?.bitsPerChannel===host.constants.BitsPerChannelType.THIRTYTWO;
   if(float) $('decomposition').selectedIndex=1;
   $('decomposition').disabled=busy || $('preserveModelBackground').checked || float;
@@ -239,6 +259,7 @@ function showPage(page) {
   processUI?.pageChanged();
 }
 async function restoreModelSettings() {
+  let userPath=false;
   const folder=await require('uxp').storage.localFileSystem.getDataFolder();
   settingsFile=(await folder.getEntries()).find(x=>x.name==='model-settings.json');
   if (settingsFile) {
@@ -246,6 +267,7 @@ async function restoreModelSettings() {
     if(content) {
       const settings=JSON.parse(content);
       const executable=settings.engineMode===1 && settings.cpuExecutable?settings.cpuExecutable:settings.executable;
+      userPath=!!executable;
       if(executable) $('executable').value=executable;
       acceptedLicenses=settings.acceptedLicenses || [];
       for(const id of ['stride','decomposition']) $(id).selectedIndex=settings[id];
@@ -256,6 +278,7 @@ async function restoreModelSettings() {
     settingsFile=await folder.createFile('model-settings.json');
     await saveModelSettings();
   }
+  return userPath;
 }
 function saveModelSettings() {
   const settings={executable:$('executable').value,acceptedLicenses};
@@ -270,6 +293,7 @@ function modelExecutable() {
 }
 async function readModelLicense() {
   modelInfo=await api('/starnet-info',{executable:modelExecutable()});
+  if(modelInfo.modern && !modelInfo.license_sha256){modelState();throw new Error('缺少可读的 StarNet2 许可文件，请完整解压官方包后重试。');}
   $('licenseText').textContent=modelInfo.license || '此 CPU 兼容版沿用原发行包许可，请阅读引擎目录中的 LICENSE。';
   $('acceptModelLicense').checked=acceptedLicenses.includes(modelInfo.license_sha256);
   $('acceptModelLicense').parentElement.style.display=modelInfo.modern?'block':'none';
@@ -307,6 +331,8 @@ async function run(action) {
 async function extract() {
   if(!modelExecutable()) throw new Error('请先展开「星点提取模型」，填写当前引擎程序路径。下载与安装步骤见 README。');
   modelInfo=await api('/starnet-info',{executable:modelExecutable()});
+  modelState();
+  if(modelInfo.installation?.ready!==true)throw new Error($('modelState').textContent);
   if(modelInfo.modern && !acceptedLicenses.includes(modelInfo.license_sha256)) {
     $('modelSettings').classList.add('expanded');
     await readModelLicense();
@@ -413,8 +439,13 @@ $('chooseExecutable').addEventListener('click',()=>run(async()=>{
   await checkModel();
 }));
 $('readModelLicense').addEventListener('click',()=>run(readModelLicense));
+$('findExecutable').addEventListener('click',()=>run(()=>findModel()));
+$('modelOfficialHelp').addEventListener('click',()=>run(async()=>{
+  const result=await require('uxp').shell.openExternal('https://starnetastro.com/cli-tools/starnet/','打开StarNet官方CLI下载与完整安装说明；不会自动下载安装。');
+  if(result)throw new Error('打开官方说明未完成：'+result);
+}));
 $('acceptModelLicense').addEventListener('change',()=>{
-  if(!modelInfo?.modern) return;
+  if(!modelInfo?.modern || !modelInfo.license_sha256) return;
   acceptedLicenses=acceptedLicenses.filter(x=>x!==modelInfo.license_sha256);
   if($('acceptModelLicense').checked) acceptedLicenses.push(modelInfo.license_sha256);
   modelState();
@@ -437,5 +468,9 @@ document.addEventListener('uxpcommand',event=>{
   if(event.commandId==='uxphidepanel') panelVisible=false;
 });
 setInterval(()=>{if(panelVisible && serviceReady && !busy) api('/health').catch(()=>{serviceReady=false;});},20000);
-run(async()=>{await restoreModelSettings();inputState();await checkModel();status('处理当前照片，或从多张原片开始；也可直接使用页签。');});
+run(async()=>{
+  const userPath=await restoreModelSettings();inputState();await checkModel();
+  if(!userPath && modelInfo?.installation?.ready!==true)try{await findModel(true);}catch(error){modelState(error.message);}
+  status('处理当前照片，或从多张原片开始；也可直接使用页签。');
+});
 module.exports={api,extract,refresh};

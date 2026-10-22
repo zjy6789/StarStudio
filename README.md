@@ -8,7 +8,7 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前开发分支源码为 **0.19.0 开发中**，堆栈按处理目的与下一步选择，原五种模式和五种格式保留在高级选项。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
+> 当前开发分支源码为 **0.20.0 开发中**，增加StarNet模型文件检查、已知位置查找和官方安装说明入口；仍只配置一个程序路径，CPU兼容版可继续选择。参考地景分层及新增面板操作待用户手动验证；按用户要求，不再自动读取Photoshop前台或执行原生分层验证。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
 
 > 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 
@@ -121,7 +121,7 @@ StarNet++ 只需配置一次。它是外部程序，本项目不随包分发；�
 
 1. 打开 [StarNet 官方 CLI 下载页](https://starnetastro.com/cli-tools/starnet/)，下载 Windows x64 的完整 ZIP。截至 2026-10-10 为 **StarNet2 2.6.2-0242 ORT**，可用页面提供的 SHA-256 校验。
 2. 将 ZIP **完整解压**到固定的英文路径，例如 `D:\AstroTools\StarNet2`。当前新版的模型加载不兼容中文引擎路径；Star Studio 项目和照片目录仍可使用中文。保留 `starnet2.exe`、`StarNet2_weights.onnx`、`LICENSE.txt` 和所有 DLL 的相对位置；不要只复制 EXE，也不要混用不同发行包的 DLL。
-3. 打开 Star Studio 的 **星点分离 → 星点提取模型：StarNet**，点击“选择程序…”选中 `starnet2.exe`，也可在唯一的“StarNet 程序位置”输入框填写完整路径，不加引号。插件自动识别引擎版本。点击“查看当前引擎许可”，阅读完整条款并明确勾选同意；同一条款只需接受一次，条款改变需重新接受。路径与许可选择自动保存。
+3. 打开 Star Studio 的 **星点分离 → 星点提取模型：StarNet**，点击“选择程序…”选中 `starnet2.exe`，也可在唯一的“StarNet 程序位置”输入框填写完整路径，不加引号。开发版另有“查找已安装”，仅查已知目录，优先保留当前可用路径；首次没有保存路径时可预填通过文件检查的候选。状态会提示缺程序、模型或许可文件；文件齐全不代表已验证运行库或GPU。点击“查看当前引擎许可”，阅读完整条款并明确勾选同意；发现候选不会自动接受许可。同一条款只需接受一次，条款改变需重新接受。路径与许可选择自动保存。[首次使用边界](docs/FIRST_USE.md)
 4. 保持处理步长为 **256**，选择 Photoshop 中的源图层，点击 **执行星点分离**。插件自动调用引擎并创建两个结果图层。官方 Windows 包自带 DirectML，可使用兼容 NVIDIA / AMD / Intel GPU；不可用时自动回退 CPU，无需另装 CUDA 或 cuDNN。实际执行设备见任务缓存目录中的 `starnet.log`，不是仅依据显卡型号判断。
 
 **选择 CPU 版：**可在 [官方旧版 CLI 下载页](https://starnetastro.com/cli-tools/legacy/)下载 `StarNetv2CLI_Win.zip`，完整解压到另一个目录，在同一个“StarNet 程序位置”选择 `starnet++.exe` 即可。插件自动使用旧接口；已为 Siril 配置的同版目录可以复用。它使用旧版 v2.0.2 模型/运行库，处理效果可能与新版不同。新版 2.6.2 CLI 没有公开强制选择 CPU 的参数，自带的 CPU 回退仍可用。

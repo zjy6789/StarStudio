@@ -6,7 +6,7 @@ const vm=require('node:vm');
 const plain=value=>JSON.parse(JSON.stringify(value));
 function panel(options={}) {
   const elements=new Map(),events=new Map(),intervals=new Map(),timeouts=new Map();
-  const calls={requests:[],launch:[],writes:[],errors:[],pause:0,resume:0,pages:0,sync:[]};
+  const calls={requests:[],launch:[],external:[],writes:[],errors:[],uploads:0,pause:0,resume:0,pages:0,sync:[]};
   for(const match of fs.readFileSync('plugin/index.html','utf8').matchAll(/<[^>]+id="([^"]+)"[^>]*>/g)) {
     const classes=new Set((match[0].match(/class="([^"]*)"/)?.[1]||'').split(' '));
     const listeners=new Map(),attributes=new Map(),menu={children:[],appendChild(child){this.children.push(child);},set innerHTML(value){this.children=[];}};
@@ -20,19 +20,21 @@ function panel(options={}) {
   const layer={id:11,name:'Original',blendMode:'normal'};
   const doc={id:7,width:6000,height:4000,bitsPerChannel:16,title:'Test',layers:[layer],activeLayers:[layer],activeHistoryState:{id:1}};
   const h={get,calls,doc,healthFailures:options.healthFailures||0,online:options.online!==false,
-    launchError:options.launchError||'',chosenFile:null,fileGate:null,previewID:null,modalBusy:false};
+    launchError:options.launchError||'',chosenFile:null,fileGate:null,previewID:null,modalBusy:false,
+    modelError:options.modelError,modelInfo:options.modelInfo||{modern:true,license:'Terms',license_sha256:'revision-1',installation:{ready:true,modelPath:'model'}},
+    candidate:options.candidate||{executable:null}};
   const host={app:{documents:options.noDocument?[]:[doc],activeDocument:options.noDocument?null:doc},constants:{BitsPerChannelType:{EIGHT:8,SIXTEEN:16,THIRTYTWO:32},BlendMode:{LINEARDODGE:'linearDodge',LINEARLIGHT:'linearLight'}},
     documentInfo:doc=>doc,layers:doc=>doc.layers.map(layer=>({id:layer.id,name:layer.name,layer})),
     starEncoding:(doc,layer)=>doc.bitsPerChannel===32?'signed':layer?.blendMode==='linearLight'?'gray':'black',
     starBlendModes:doc=>doc.bitsPerChannel===32?['normal','lighten','linearDodge']:['normal','lighten','screen','linearDodge','linearLight'],
     core:{executeAsModal:async action=>action({})},transaction:async(doc,name,action)=>action({}),
-    upload:async(doc,layer)=>({id:'input',width:doc.width,height:doc.height,size:doc.bitsPerChannel,components:4,name:layer.name,docID:doc.id,layerID:layer.id}),
+    upload:async(doc,layer)=>{calls.uploads++;return {id:'input',width:doc.width,height:doc.height,size:doc.bitsPerChannel,components:4,name:layer.name,docID:doc.id,layerID:layer.id};},
     write:async(doc,key,meta,name)=>{const layer={id:20+doc.layers.length,name,visible:true};doc.layers.unshift(layer);doc.activeHistoryState.id++;return layer;},
     setStarBlendMode:(layer,mode)=>{layer.blendMode=mode;}};
   h.host=host;
   const settings={name:'model-settings.json',read:async()=>JSON.stringify(options.saved||{executable:'D:\\engine\\starnet2.exe',stride:1,decomposition:0}),
     write:async value=>calls.writes.push(JSON.parse(value))};
-  const storage={getDataFolder:async()=>({getEntries:async()=>[settings]}),
+  const storage={getDataFolder:async()=>({getEntries:async()=>options.fresh?[]:[settings],createFile:async()=>settings}),
     getFileForOpening:async()=>{if(h.fileGate)await h.fileGate;return h.chosenFile;}};
   const processUI={updateActions(){},pause:async()=>{calls.pause++;},resume:()=>{calls.resume++;},
     isModalBusy:()=>h.modalBusy,previewDocumentID:()=>h.previewID,pageChanged:()=>{calls.pages++;},
@@ -49,15 +51,17 @@ function panel(options={}) {
       const route=new URL(url).pathname;
       calls.requests.push({route,options:plain(requestOptions)});
       if(route==='/health' && (!h.online || h.healthFailures-->0))throw new Error('connection refused');
-      if(route==='/starnet-info' && options.modelError)throw new Error(options.modelError);
+      if(route==='/starnet-info' && h.modelError)throw new Error(h.modelError);
+      if(route==='/starnet-discover' && h.discoveryGate)await h.discoveryGate;
       if(route==='/jobs')h.jobRequest=JSON.parse(requestOptions.body);
-      const data=route==='/starnet-info'?{modern:true,license:'Terms',license_sha256:'revision-1'}:{ok:true,version:'0.6.0'};
+      const data=route==='/starnet-info'?(options.infoByPath?.[JSON.parse(requestOptions.body).executable]||h.modelInfo):route==='/starnet-discover'?h.candidate:{ok:true,version:'0.6.0'};
       return {ok:true,json:async()=>route==='/jobs'?{id:'extract-job'}:route==='/jobs/extract-job'?(h.jobState || {state:'done',progress:1,result:{background:'bg',stars:'stars',provider:'test',starEncoding:h.jobRequest.preserveModelBackground?h.jobRequest.starEncoding:'black'}}):data};
     },
     require:name=>{
       if(name==='./host.js')return host;
       if(name==='./bridge.json')return {url:'http://127.0.0.1:8765',token:'test-token',launcher:'D:\\StarStudio\\Start.exe',starnet:'D:\\engine\\starnet2.exe'};
-      if(name==='uxp')return {storage:{localFileSystem:storage},shell:{openPath:async(...args)=>{calls.launch.push(args);return h.launchError;}}};
+      if(name==='uxp')return {storage:{localFileSystem:storage},shell:{openPath:async(...args)=>{calls.launch.push(args);return h.launchError;},
+        openExternal:async(...args)=>{calls.external.push(args);return h.externalError||'';}}};
       if(name==='./stack.js')return {setup:options=>{stackSetups++;h.stackOptions=options;return {updateActions(){}};}};
       if(name==='./linear-preparation.js')return {setup:options=>{prepareSetups++;h.prepareOptions=options;return {updateActions(){},setLastMaster:(file,format)=>{h.lastMaster={file,format};}};}};
       if(name==='./background.js')return {setup:options=>{h.backgroundOptions=options;return {updateActions(){},sync(){},previewDocumentID:()=>h.backgroundPreviewID};}};
@@ -196,7 +200,7 @@ test('unconfirmed and linear inputs stop extraction before image upload with con
 
 test('optional engine failures explain the next step without blocking stack or existing stars',async()=>{
   const h=panel({modelError:'找不到 StarNet'});await h.settle();
-  assert.match(h.get('modelState').textContent,/无法就绪.*其他工具仍可使用/);
+  assert.match(h.get('modelState').textContent,/缺少程序.*其他工具仍可使用/);
   await h.emit('startStack');assert.equal(h.get('stackPage').classList.contains('active'),true);
   await h.emit('processTab');assert.equal(h.get('processPage').classList.contains('active'),true);
   assert.equal(h.get('stackFiles').disabled,false);
@@ -221,6 +225,79 @@ test('model controls save their state, clear stale license UI, and persist the e
   h.get('executable').value='D:\\new\\starnet2.exe';await h.emit('executable','change');await h.settle();
   assert.equal(h.get('modelLicense').classList.contains('expanded'),false);
   h.chosenFile=null;await h.emit('chooseExecutable');assert.equal(h.get('executable').value,'D:\\new\\starnet2.exe');
+});
+
+test('a fresh installation discovers a complete candidate without accepting its license or opening help',async()=>{
+  const candidate={executable:'E:\\new\\starnet2.exe',installation:{ready:true}};
+  const h=panel({fresh:true,modelInfo:{modern:true,installation:{ready:false,modelPath:null}},candidate,
+    infoByPath:{[candidate.executable]:{modern:true,license:'Terms',license_sha256:'revision-1',installation:{ready:true,modelPath:'new-model'}}}});await h.settle();
+  assert.equal(h.calls.requests.filter(r=>r.route==='/starnet-discover').length,1);
+  assert.equal(h.get('executable').value,candidate.executable);assert.equal(h.calls.writes.at(-1).executable,candidate.executable);
+  assert.deepEqual(h.calls.writes.at(-1).acceptedLicenses,[]);
+  assert.match(h.get('modelState').textContent,/许可待确认/);
+  assert.equal(h.get('modelLicense').classList.contains('expanded'),false);assert.equal(h.calls.external.length,0);
+});
+
+test('a fresh installation keeps a complete installer default without searching or accepting terms',async()=>{
+  const h=panel({fresh:true});await h.settle();
+  assert.ok(!h.calls.requests.some(r=>r.route==='/starnet-discover'));
+  assert.equal(h.get('executable').value,'D:\\engine\\starnet2.exe');
+  assert.deepEqual(h.calls.writes.at(-1).acceptedLicenses,[]);assert.match(h.get('modelState').textContent,/许可待确认/);
+});
+
+test('saved paths are never automatically replaced and explicit discovery preserves a valid CPU choice',async()=>{
+  const cpu='E:\\CPU\\starnet++.exe';
+  const h=panel({saved:{executable:cpu},modelInfo:{modern:false,installation:{ready:true,modelPath:'cpu-model'}},
+    candidate:{executable:cpu,preserved:true,installation:{ready:true}}});await h.settle();
+  assert.ok(!h.calls.requests.some(r=>r.route==='/starnet-discover'));
+  await h.emit('findExecutable');assert.equal(h.get('executable').value,cpu);
+  assert.match(h.get('modelState').textContent,/CPU兼容版.*实际推理反馈/);
+  assert.match(h.get('status').textContent,/保留当前程序路径/);assert.equal(h.get('acceptModelLicense').disabled,true);
+  h.modelError='找不到 StarNet';await h.emit('executable','change');
+  assert.equal(h.calls.requests.filter(r=>r.route==='/starnet-discover').length,1,'an invalid saved path requires an explicit search');
+});
+
+test('discovery leaves the path intact when no complete candidate exists or the user changed it during the request',async()=>{
+  const h=panel();await h.settle();const before=h.get('executable').value;
+  await h.emit('findExecutable');assert.equal(h.get('executable').value,before);assert.match(h.get('status').textContent,/没有通过.*文件检查/);
+  let finish;h.discoveryGate=new Promise(resolve=>{finish=resolve;});
+  h.candidate={executable:'E:\\candidate\\starnet2.exe',installation:{ready:true}};
+  const pending=h.emit('findExecutable');await h.settle();h.get('executable').value='F:\\manual\\starnet++.exe';
+  finish();await pending;assert.equal(h.get('executable').value,'F:\\manual\\starnet++.exe');
+  assert.ok(!h.calls.writes.some(s=>s.executable===h.candidate.executable));
+});
+
+test('discovery rejects unchecked results and never replaces a path with them',async()=>{
+  const h=panel({candidate:{executable:'E:\\incomplete\\starnet2.exe',installation:{ready:false}}});await h.settle();
+  const before=h.get('executable').value;await h.emit('findExecutable');
+  assert.equal(h.get('executable').value,before);assert.match(h.get('status').textContent,/未返回已通过文件检查/);
+});
+
+for(const [info,diagnostic] of [
+  [{modern:true,installation:{ready:false,modelPath:null}},/缺少模型文件.*StarNet2_weights.onnx/],
+  [{modern:false,installation:{ready:false,modelPath:null}},/缺少模型文件.*starnet2_weights.pb/],
+  [{modern:true,installation:{ready:false,modelPath:'model'},license_sha256:null},/缺少许可文件/],
+  [{modern:true,license_sha256:'revision-1'},/更新处理组件/]
+]) test('incomplete model files or an old backend stop before upload: '+diagnostic,async()=>{
+  const h=panel({modelInfo:info,saved:{executable:'D:\\engine\\starnet2.exe',acceptedLicenses:['revision-1']}});await h.settle();
+  assert.match(h.get('modelState').textContent,diagnostic);
+  h.get('photoStage').selectedIndex=1;await h.emit('photoStage','change');await h.emit('extract');
+  assert.match(h.get('status').textContent,diagnostic);assert.equal(h.calls.uploads,0);
+  assert.ok(!h.calls.requests.some(r=>r.route==='/jobs'));assert.equal(h.get('stackFiles').disabled,false);
+  await h.emit('processTab');assert.equal(h.get('processPage').classList.contains('active'),true);
+});
+
+test('missing modern license cannot be accepted and official help opens only after an explicit click',async()=>{
+  const h=panel({modelInfo:{modern:true,installation:{ready:false,modelPath:'model'},license_sha256:null}});await h.settle();
+  assert.equal(h.get('acceptModelLicense').disabled,true);await h.emit('readModelLicense');
+  assert.match(h.get('status').textContent,/缺少可读.*许可文件/);assert.equal(h.calls.external.length,0);
+  await h.emit('modelOfficialHelp');assert.equal(h.calls.external.length,1);
+  assert.equal(h.calls.external[0][0],'https://starnetastro.com/cli-tools/starnet/');
+  const manifest=JSON.parse(fs.readFileSync('plugin/manifest.json','utf8'));
+  assert.ok(manifest.requiredPermissions.launchProcess.schemes.includes('https'));
+  h.externalError='permission denied';await h.emit('modelOfficialHelp');
+  assert.match(h.get('status').textContent,/打开官方说明未完成.*permission denied/);
+  assert.equal(h.get('stackFiles').disabled,false);
 });
 
 test('the extraction button enforces the license before image work and restores controls on failure',async()=>{

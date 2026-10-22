@@ -478,6 +478,9 @@ class Handler(BaseHTTPRequestHandler):
                     self.reply({"ok": True})
             elif self.command == "POST" and parts == ["starnet-info"]:
                 self.reply(starnet_info(json.loads(body)["executable"]))
+            elif self.command == "POST" and parts == ["starnet-discover"]:
+                from .starnet_install import discover_starnet
+                self.reply(discover_starnet(json.loads(body).get("current", "")))
             elif self.command == "POST" and parts == ["jobs"]:
                 self.reply({"id": store.job(json.loads(body))})
             elif len(parts) == 2 and parts[0] == "jobs" and self.command in ("GET", "DELETE"):

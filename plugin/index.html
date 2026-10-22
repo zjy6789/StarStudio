@@ -130,9 +130,10 @@
   <button id="modelOptions" class="disclosure">星点提取模型：StarNet ▾</button>
   <div id="modelState" class="hint">StarNet 待检查；未配置也可堆栈或加工已有星点层。</div>
   <div id="modelSettings" class="collapsed">
-    <label>StarNet 程序位置</label><div class="row"><input id="executable" type="text" placeholder="选择 starnet2.exe 或 CPU 版 starnet++.exe"><button id="chooseExecutable">选择程序…</button></div>
+    <label>StarNet 程序位置</label><div class="row"><input id="executable" type="text" placeholder="选择 starnet2.exe 或 CPU 版 starnet++.exe"><button id="chooseExecutable">选择程序…</button><button id="findExecutable">查找已安装</button></div>
     <div class="hint">自动识别所选程序。新版 StarNet2 优先使用 GPU，不可用时回退 CPU；也可选择旧版 CPU 引擎。请完整解压官方 CLI 包。</div>
     <button id="readModelLicense">查看当前引擎许可</button>
+    <button id="modelOfficialHelp">StarNet 官方下载与安装说明</button>
     <div id="modelLicense" class="collapsed"><div id="licenseText" class="licenseText"></div><label><input id="acceptModelLicense" type="checkbox"> 我已阅读并同意此版本的 StarNet2 许可</label></div>
     <label>处理步长</label><sp-picker id="stride"><sp-menu><sp-menu-item>256（默认）</sp-menu-item><sp-menu-item>128</sp-menu-item><sp-menu-item>64（较慢）</sp-menu-item><sp-menu-item>384（新版，广域小星点）</sp-menu-item></sp-menu></sp-picker>
     <div class="hint">步长越小，计算量越大。广域小星点可尝试新版 384；步长会改变去星效果，处理后检查残星与边缘。</div>
