@@ -6,7 +6,7 @@ let docID = null, layerList = [], busy = false, updatingPickers=false;
 let currentPage='stack', serviceReady=false, documentSnapshot=null, panelVisible=true;
 let settingsFile=null, settingsWrite=Promise.resolve();
 let modelInfo=null, acceptedLicenses=[];
-let stackUI=null, processUI=null, prepareUI=null, backgroundUI=null, stretchUI=null, maskUI=null, colorUI=null, denoiseUI=null;
+let stackUI=null, processUI=null, prepareUI=null, backgroundUI=null, stretchUI=null, maskUI=null, colorUI=null, denoiseUI=null, residualUI=null;
 const pickerValues = {};
 let blendSourceKey=null;
 const photoStages=new Map();
@@ -113,18 +113,18 @@ function workingDocument() {
   if(!doc) throw new Error('请打开源照片。');
   return host.documentInfo(doc);
 }
-function isPreview(id) { return id!=null && (id===processUI?.previewDocumentID() || id===backgroundUI?.previewDocumentID() || id===stretchUI?.previewDocumentID() || id===colorUI?.previewDocumentID() || id===denoiseUI?.previewDocumentID()); }
+function isPreview(id) { return id!=null && (id===processUI?.previewDocumentID() || id===backgroundUI?.previewDocumentID() || id===stretchUI?.previewDocumentID() || id===colorUI?.previewDocumentID() || id===denoiseUI?.previewDocumentID() || residualUI?.isPreview(id)); }
 function refresh(followActive=false) {
   const doc=workingDocument();
   const previous=doc.id===docID;
   layerList=host.layers(doc); docID=doc.id;
   const options=layerList.map(x=>({label:x.name, value:x.id}));
-  for (const id of ['source','processSource','processBackground','backgroundSource']) {
+  for (const id of ['source','processSource','processBackground','backgroundSource','residualOriginal','residualModel']) {
     const old=previous?value(id):null;
     if(id==='source') {
       const active=doc.activeLayers[0]?.id;
       choose(id,options,followActive?active:options.some(x=>x.value===old)?old:active);
-    } else choose(id,[{label:id==='processBackground'?'不使用背景图层':id==='backgroundSource'?'选择照片或背景图层':'选择星点图层',value:null},...options],options.some(x=>x.value===old)?old:null);
+    } else choose(id,[{label:id==='processBackground'?'不使用背景图层':id==='backgroundSource'?'选择照片或背景图层':id==='residualOriginal'?'选择分离前原图':id==='residualModel'?'未提供模型参考':'选择星点图层',value:null},...options],options.some(x=>x.value===old)?old:null);
   }
   refreshBlendModes(doc);
   $('documentName').textContent=doc.title+' · '+doc.width+' × '+doc.height;
@@ -172,6 +172,7 @@ function updateActions() {
   if(maskUI) maskUI.updateActions(busy);
   if(colorUI) colorUI.updateActions(busy);
   if(denoiseUI) denoiseUI.updateActions(busy);
+  if(residualUI) residualUI.updateActions(busy);
 }
 function syncLayers() {
   if (busy || processUI?.isModalBusy()) return;
@@ -181,13 +182,14 @@ function syncLayers() {
     documentSnapshot=next;
     if (!next) {
       docID=null; layerList=[];
-      for (const id of ['source','processSource','processBackground','backgroundSource']) choose(id,[],null);
+      for (const id of ['source','processSource','processBackground','backgroundSource','residualOriginal','residualModel']) choose(id,[],null);
       $('documentName').textContent='未打开照片'; if(!['stack','prepare','stretch'].includes(currentPage)) status('请先打开一张照片。');
       if(processUI) processUI.sync(next,old);
       if(backgroundUI) backgroundUI.sync(next,old);
       if(maskUI) maskUI.sync(next,old);
       if(colorUI) colorUI.sync(next,old);
       if(denoiseUI) denoiseUI.sync(next,old);
+      if(residualUI) residualUI.sync(next,old);
       updateActions(); return;
     }
     const changed=!old || old.id!==next.id;
@@ -197,6 +199,7 @@ function syncLayers() {
     if(maskUI) maskUI.sync(next,old);
     if(colorUI) colorUI.sync(next,old);
     if(denoiseUI) denoiseUI.sync(next,old);
+    if(residualUI) residualUI.sync(next,old);
     if (changed && !['stack','prepare','stretch'].includes(currentPage)) status('选择图层后即可处理。');
     updateActions();
   } catch(e) { status(e.message,true); updateActions(); }
@@ -426,6 +429,7 @@ processUI=require('./star-processing.js').setup({run,api,job,status,report,selec
 maskUI=require('./protection-masks.js').setup({run,api,job,status,report,selectedLayer,workingDocument,starRelation,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers});
 colorUI=require('./sky-color.js').setup({run,api,job,status,report,selectedLayer,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,stage:doc=>photoStages.get(doc.id) || 'unknown',onApplied:doc=>{photoStages.set(doc.id,'developed');refresh();documentSnapshot=snapshot();}});
 denoiseUI=require('./background-denoise.js').setup({run,api,job,status,report,selectedLayer,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,stage:doc=>photoStages.get(doc.id) || 'unknown',onApplied:doc=>{photoStages.set(doc.id,'developed');refresh();documentSnapshot=snapshot();}});
+residualUI=require('./residual-compare.js').setup({run,api,status,report,selectedLayer,value,isBusy:()=>busy,isUpdatingPickers:()=>updatingPickers,onOpened:(doc,source)=>{photoStages.set(doc.id,photoStages.get(source.id) || 'unknown');refresh();documentSnapshot=snapshot();}});
 syncLayers();
 setInterval(syncLayers,800);
 document.addEventListener('uxpcommand',event=>{

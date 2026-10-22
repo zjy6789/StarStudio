@@ -29,6 +29,17 @@ test('failed selection write disposes data and rolls history back; wrong canvas 
   await assert.rejects(apply({width:2,height:1},'mask',{width:1,height:1},false,api,()=>{}),/尺寸/);assert.equal(started,1);
 });
 
+test('precise selection can join an existing modal for an atomic new-document workflow',async()=>{
+  let writes=0;
+  const context={module:{exports:{}},Float32Array,require:()=>({core:{executeAsModal:async()=>{throw new Error('nested modal');}},imaging:{
+    createImageDataFromBuffer:async data=>{assert.equal(data[0],.125);return {dispose(){}};},putSelection:async()=>{writes++;}}})};
+  vm.runInNewContext(fs.readFileSync('plugin/host.js','utf8'),context);
+  const apply=context.module.exports.applySelection,api=async()=>new Float32Array([.125]).buffer;
+  await apply({id:9,width:1,height:1},'selection',{width:1,height:1},false,api,()=>{},{isCancelled:false});assert.equal(writes,1);
+  await assert.rejects(apply({id:9,width:1,height:1},'selection',{width:1,height:1},false,api,()=>{},{isCancelled:true}),/取消/);
+  assert.equal(writes,1);
+});
+
 test('clipped effect writes opaque alpha without changing downloaded weights or colors',async()=>{
   const source=new Float32Array([-.1,.2,1.5,.25]),before=source.slice();let written;
   const context={module:{exports:{}},Float32Array,require:()=>({imaging:{

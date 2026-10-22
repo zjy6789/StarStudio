@@ -162,6 +162,18 @@
   <label class="processCompare"><input id="processOriginal" type="checkbox"> <span id="processCompareLabel">查看原星点</span></label>
   <div id="processPreviewHint" class="muted">可随时切换背景、星点和混合模式。大半径辉光或星形修复计算时保留上一帧预览。</div>
   <button id="processExecute" class="primary execute">执行星点加工</button>
+  <button id="residualOptions" class="disclosure">去星残留局部检查 ▾</button>
+  <div id="residualSettings" class="collapsed">
+    <label>分离前原图</label><sp-picker id="residualOriginal"><sp-menu></sp-menu></sp-picker>
+    <label>模型背景参考（可选）</label><sp-picker id="residualModel"><sp-menu></sp-menu></sp-picker>
+    <div class="hint">当前合成为本照片的可见图层快照。原图与模型须为顶层、非剪贴、正常混合、100%不透明度和填充；未保留模型时留空，不能把已编辑背景当作原模型。先在源照片选中需要检查的区域。</div>
+    <label><input id="residualConfirmed" type="checkbox"> 我确认原图与可选模型来自同次分离、同一画布；模型未经后续编辑</label>
+    <button id="residualCompare">创建局部比较副本</button>
+    <sp-picker id="residualView"><sp-menu><sp-menu-item>当前可见合成</sp-menu-item><sp-menu-item>分离前原图</sp-menu-item><sp-menu-item id="residualModelView">模型背景参考</sp-menu-item></sp-menu></sp-picker>
+    <div id="residualSummary" class="hint">同一32位文档、相同显示条件比较原图像素；不自动提亮、归一化或再次去星。比较使用选区外接矩形，不把它当作精确修补蒙版。</div>
+    <button id="residualRepair">创建全尺寸局部修补副本</button>
+    <div class="muted">修补副本保留原精确选区，供PS局部工具手工处理；不自动模糊、蒙尘划痕或生成填充。原文档保留，旧比较不自动关闭或覆盖。</div>
+  </div>
   <button id="maskOptions" class="disclosure">蒙版与色晕候选 ▾</button>
   <div id="maskSettings" class="collapsed">
     <label>覆盖来源</label><sp-picker id="maskMode"><sp-menu><sp-menu-item>星点覆盖</sp-menu-item><sp-menu-item>星点外区域</sp-menu-item><sp-menu-item>主体选区</sp-menu-item><sp-menu-item>蓝紫晕候选（RGB星点层）</sp-menu-item></sp-menu></sp-picker>

@@ -66,6 +66,7 @@ function panel(options={}) {
       if(name==='./protection-masks.js')return {setup:options=>{h.maskOptions=options;return {updateActions(){},sync(){}};}};
       if(name==='./sky-color.js')return {setup:options=>{h.colorOptions=options;return {updateActions(){},sync(){},previewDocumentID:()=>h.colorPreviewID};}};
       if(name==='./background-denoise.js')return {setup:options=>{h.denoiseOptions=options;return {updateActions(){},sync(){},previewDocumentID:()=>h.denoisePreviewID};}};
+      if(name==='./residual-compare.js')return {setup:options=>{h.residualOptions=options;return {updateActions(){},sync(){},isPreview:id=>id===h.residualPreviewID};}};
       throw new Error('Unexpected require '+name);
     }
   };
@@ -120,6 +121,14 @@ test('background preview remains associated with its source and an applied copy 
   const result={...source,id:99,title:'corrected'};h.host.app.documents.push(result);h.host.app.activeDocument=result;
   h.backgroundOptions.onApplied(result);assert.equal(h.backgroundOptions.stage(result),'developed');
   assert.match(h.get('documentName').textContent,/corrected/);
+});
+
+test('residual snapshots remain excluded as sources and repair output retains its source stage',async()=>{
+  const h=panel();await h.settle();h.get('photoStage').selectedIndex=1;await h.emit('photoStage','change');
+  h.residualPreviewID=88;h.host.app.documents.push({id:88});h.host.app.activeDocument=h.host.app.documents.at(-1);
+  await h.tick(800);assert.match(h.get('documentName').textContent,/Test/);
+  const repair={...h.doc,id:99,title:'Repair'};h.host.app.documents.push(repair);h.host.app.activeDocument=repair;
+  h.residualOptions.onOpened(repair,h.doc);assert.equal(h.get('photoStage').selectedIndex,1);assert.match(h.get('documentName').textContent,/Repair/);
 });
 
 test('T4 hands the saved copy to T6 explicitly and stretch output stages distinguish identity from nonlinear',async()=>{

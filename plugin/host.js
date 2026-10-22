@@ -259,9 +259,9 @@ async function uploadSelection(doc, api, report) {
   } catch(error) {await api('/images/'+id,undefined,false,'DELETE');throw error;}
 }
 
-async function applySelection(doc, key, meta, invert, api, report) {
+async function applySelection(doc, key, meta, invert, api, report, modalContext=null) {
   if(doc.width!==meta.width || doc.height!==meta.height) throw new Error('画布尺寸已变化，请重新生成蒙版。');
-  return transaction(doc,'应用保护选区',async context=>{
+  const put=async context=>{
     const block=Math.max(1,Math.floor(8*1024*1024/(meta.width*4)));
     for(let y=0;y<meta.height;y+=block) {
       if(context.isCancelled) throw new Error('用户取消了操作。');
@@ -274,7 +274,8 @@ async function applySelection(doc, key, meta, invert, api, report) {
       finally {imageData.dispose();}
       report((y+rows)/meta.height);
     }
-  });
+  };
+  return modalContext?put(modalContext):transaction(doc,'应用保护选区',put);
 }
 
 async function uploadBackground(doc,layer,api,report) {
