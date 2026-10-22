@@ -12,6 +12,8 @@ Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. T
 
 > 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 
+> Photoshop相关待办集中见 [待用户手动验证](docs/MANUAL_VALIDATION.md)。开发分支的源码、文件和打包检查不等于这些原生项已验收。
+
 > 0.6.0 安装包包含堆栈校准场与 FITS 输出，已验证数值及真实 RAW 暗场/偏置处理。使用规则见 [校准说明](docs/CALIBRATION.md)，测试结果和剩余范围见 [验证记录](VALIDATION.md)。需要在 Siril 继续处理时请选择 32 位 FITS；Siril 1.4.2 不能完整读取本插件 16 位 FITS 的缩放浮点范围。
 
 > 0.6.0 关闭独立的星点重混合页面，改为在星点加工中选择背景和 Photoshop 混合模式，自动打开全分辨率预览；支持新版 StarNet GPU CLI 和可选彩色残留修正。验证范围见 [VALIDATION.md](VALIDATION.md)。

@@ -137,7 +137,7 @@ function setup({run,api,status,report,selectedLayer,value,isBusy,isUpdatingPicke
   }));
   $('residualRepair').addEventListener('click',()=>run(async()=>{
     const source=validate(),copy=await createRepair(source,api,report);onOpened(copy,source.doc);
-    status('已创建全尺寸32位当前合成副本并保留精确选区。请用PS局部工具手动处理；未自动修改像素内容，原文档保留。');
+    status('已创建全尺寸32位当前合成副本并保留精确选区。请用PS局部工具手动处理；未自动执行修补，原文档保留。');
   }));
   for(const id of ['residualOriginal','residualModel'])$(id).addEventListener('change',()=>{
     if(isUpdatingPickers())return;
