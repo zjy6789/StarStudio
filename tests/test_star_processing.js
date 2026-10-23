@@ -518,6 +518,40 @@ test('a full layer upload finishing after page exit stays reusable without start
   h.finish('job1');await h.tick(150);assert.deepEqual(h.calls.unsafeDeletes,[]);
 });
 
+test('a layer upload completing off-page does not overwrite another tool progress',async()=>{
+  let page='process';const progress=[],gate=deferred();
+  const h=processingHarness({currentPage:()=>page,report:x=>progress.push(x)}),upload=h.host.upload;
+  h.host.upload=async(...args)=>{args[3](.1);const result=await upload(...args);await gate.promise;args[3](1);return result;};
+  await h.enableGlow();assert.deepEqual(progress,[.1]);
+  page='stack';h.ui.pageChanged();gate.resolve();await h.flush();
+  assert.deepEqual(progress,[.1]);assert.equal(h.calls.jobs.length,0);assert.equal(h.images.has('input1'),true);
+  page='process';h.ui.pageChanged();await h.tick(180);
+  assert.equal(h.calls.uploads.length,1);h.finish('job1');await h.tick(150);
+  assert.ok(progress.includes(.25),'Current processing still reports progress');
+});
+
+test('a superseded native preview write does not report progress on another page',async()=>{
+  let page='process';const progress=[],gate=deferred();
+  const h=processingHarness({currentPage:()=>page,report:x=>progress.push(x)});
+  h.emit('processSource','change',11);await h.flush();const native=h.host.canvasStarPreview;
+  h.host.canvasStarPreview=async(...args)=>{
+    args[6](.1);await gate.promise;args[6](1);
+    if(!args[7]()){const error=new Error('Superseded');error.stale=true;throw error;}
+    return native(...args);
+  };
+  h.emit('processBlend','change','lighten');await h.flush();assert.deepEqual(progress,[.1]);
+  page='stack';h.ui.pageChanged();gate.resolve();await h.flush();
+  assert.deepEqual(progress,[.1]);
+  page='process';h.ui.pageChanged();await h.flush();assert.deepEqual(progress,[.1,.1,1]);
+});
+
+test('direct execution still reports upload progress while automatic preview is paused',async()=>{
+  const progress=[],h=processingHarness({report:x=>progress.push(x)}),upload=h.host.upload;
+  h.host.upload=async(...args)=>{args[3](.5);return upload(...args);};
+  h.emit('processSource','change',11);h.elements.get('glowEnabled').checked=true;
+  await h.emit('processExecute','click');assert.ok(progress.includes(.5));assert.equal(h.calls.outputs.length,1);
+});
+
 test('a task id arriving after page exit is canceled without reporting progress on another page',async()=>{
   let page='process';const h=processingHarness({currentPage:()=>page}),gate=deferred();
   h.createGate=gate;h.cancelDelayed=true;await h.enableGlow();

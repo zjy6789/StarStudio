@@ -8,7 +8,7 @@
 
 Star Studio is a local astrophotography plugin for Adobe Photoshop on Windows. The installer includes Python and image-processing dependencies. Star removal requires a separate StarNet++ CLI installation; see the instructions below. Star-processing controls, previews and layer output have been checked in Photoshop 2026; see [validation status](VALIDATION.md).
 
-> 当前开发分支源码为 **0.24.5 开发中**，修复32位星点负差值在上传时被拒绝、无法加工预览的问题；分离作业明确失败后释放输入缓存，重试不再累积这些已结束任务的输入；保留离开加工页停止过期任务、返回自动预览、图层误选恢复、原线性TIFF保留零点提亮、引擎检查、基础/高级混合分层及窄栏布局候选。仍只配置一个StarNet程序路径，CPU兼容版可继续选择。窄栏候选尚待PS验证，最小宽度继续660px。2026-10-23已恢复Photoshop测试，参考地景分层的合成图与24MP两层全图像素、ICC核对通过；隔离面板实际堆栈选择/保存/分层打开及256图保留零点提亮的预览/输出/撤销通过。生产权限、正式安装和其他未验操作仍保留待办。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
+> 当前开发分支源码为 **0.24.6 开发中**，补齐离开加工页后的传输进度隔离，保留直接执行进度；修复32位星点负差值在上传时被拒绝、无法加工预览的问题；分离作业明确失败后释放输入缓存，重试不再累积这些已结束任务的输入；保留离开加工页停止过期任务、返回自动预览、图层误选恢复、原线性TIFF保留零点提亮、引擎检查、基础/高级混合分层及窄栏布局候选。仍只配置一个StarNet程序路径，CPU兼容版可继续选择。窄栏候选尚待PS验证，最小宽度继续660px。2026-10-23已恢复Photoshop测试，参考地景分层的合成图与24MP两层全图像素、ICC核对通过；隔离面板实际堆栈选择/保存/分层打开及256图保留零点提亮的预览/输出/撤销通过。生产权限、正式安装和其他未验操作仍保留待办。main已验证候选仍为 **0.10.0**。开发分支尚未作为完成安装版本交付，证据和边界见 [VALIDATION.md](VALIDATION.md)。
 
 > 调研迭代与剩余要求见 [进度与验收清单](docs/RESEARCH_IMPLEMENTATION_STATUS.md)；回退记录见 [T1/T2](docs/ITERATION_T1_T2_2026-10-18.md)、[T3](docs/ITERATION_T3_2026-10-18.md)、[线性准备](docs/LINEAR_PREPARATION.md)、[背景校正](docs/BACKGROUND_GRADIENT.md)、[受保护拉伸](docs/PROTECTED_STRETCH.md)和 [参考地景分层开发](docs/REFERENCE_GROUND.md)。
 

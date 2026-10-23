@@ -44,10 +44,11 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
     nativeQueue=work.catch(()=>{});return work;
   }
   const remove=(key,path='/images')=>key?api(path+'/'+key,undefined,false,'DELETE').catch(()=>{}):Promise.resolve();
+  const processingReport=progress=>{if(currentPage()==='process') report(progress);};
   async function uploadSource(target) {
     const path=target.info.starEncoding==='signed'?'/star-sources':'/images';
     const uploadAPI=(url,...args)=>api(url.replace(/^\/images(?=\/|$)/,path),...args);
-    return {...await host.upload(target.doc,target.layer,uploadAPI,report),path};
+    return {...await host.upload(target.doc,target.layer,uploadAPI,processingReport),path};
   }
   function selection() {
     const {doc,layer}=selectedLayer('processSource');
@@ -111,7 +112,7 @@ function setup({run,api,job,status,report,selectedLayer,useActive,value,refresh,
       if(version!==compositionVersion || paused) return;
       try {
         previewState=await host.canvasStarPreview(previewState,result,meta?.sourceKey===selected.info.sourceKey?meta:selected.info,
-          backdrop,blend,api,report,()=>version===compositionVersion && !paused);
+          backdrop,blend,api,processingReport,()=>version===compositionVersion && !paused);
         if(version===compositionVersion && !paused) {displayed={sourceKey:selected.info.sourceKey,key:shownKey,composition:key};previewHint();}
       } catch(e) {
         if(version===compositionVersion) compositionKey=null;
