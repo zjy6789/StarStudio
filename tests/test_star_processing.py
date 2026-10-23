@@ -1,6 +1,8 @@
 import time
 import subprocess
 import sys
+import os
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -299,6 +301,55 @@ def test_cancel_glow_after_first_batch_stops_and_does_not_cache_partial_halo(tmp
     with pytest.raises(InterruptedError, match='已取消'):
         process_stars(image, settings, tmp_path, cache=cache, canceled=lambda: bool(calls))
     assert len(calls) == 1
+    assert 'glow' not in cache
+    np.testing.assert_array_equal(image, original)
+
+
+@pytest.mark.parametrize('sigma', [.5, 12, 31.875, 32, 36, 120, 360])
+@pytest.mark.parametrize('channels', [1, 3])
+def test_large_gaussian_uses_bounded_parallel_batches_without_changing_values(monkeypatch, sigma, channels):
+    from backend import star_processing
+    operation = 'gaussian_filter1d' if sigma < 32 else 'oaconvolve'
+    image = np.random.default_rng(811).random((1025, 1024, channels*2), dtype=np.float32)[..., ::2]
+    original = image.copy()
+    monkeypatch.setattr(os, 'cpu_count', lambda: 1)
+    expected = gaussian_halo(image, sigma)
+    real_filter = getattr(star_processing, operation)
+    workers, lock, overlap = set(), threading.Lock(), threading.Event()
+    def traced(*args, **kwargs):
+        with lock:
+            workers.add(threading.get_ident())
+            if len(workers) >= 2:
+                overlap.set()
+        if threading.current_thread() is not threading.main_thread():
+            assert overlap.wait(5), 'Independent native filter blocks must overlap'
+        return real_filter(*args, **kwargs)
+    monkeypatch.setattr(star_processing, operation, traced)
+    monkeypatch.setattr(os, 'cpu_count', lambda: 128)
+    actual = gaussian_halo(image, sigma)
+    assert overlap.is_set() and 2 <= len(workers) <= 4
+    np.testing.assert_array_equal(actual.view('u4'), expected.view('u4'))
+    np.testing.assert_array_equal(image, original)
+
+
+@pytest.mark.parametrize('sigma, operation', [(12, 'gaussian_filter1d'), (36, 'oaconvolve')])
+def test_cancel_large_parallel_glow_drains_current_batch_and_preserves_source(tmp_path, monkeypatch, sigma, operation):
+    from backend import star_processing
+    real_filter = getattr(star_processing, operation)
+    canceled, calls = threading.Event(), []
+    def interrupted(*args, **kwargs):
+        result = real_filter(*args, **kwargs)
+        calls.append(1)
+        canceled.set()
+        return result
+    monkeypatch.setattr(os, 'cpu_count', lambda: 4)
+    monkeypatch.setattr(star_processing, operation, interrupted)
+    image = np.full((1025, 1024, 4), .4, dtype=np.float32)
+    original, cache = image.copy(), {}
+    with pytest.raises(InterruptedError, match='已取消'):
+        process_stars(image, {'glow': dict(enabled=True, radius=sigma)}, tmp_path,
+                      cache=cache, canceled=canceled.is_set)
+    assert 1 <= len(calls) <= 4
     assert 'glow' not in cache
     np.testing.assert_array_equal(image, original)
 

@@ -4,7 +4,9 @@ Bloom's quadratic soft knee is adapted from Keijiro Takahashi's MIT KinoBloom;
 see vendor/KINOBLOOM-LICENSE.txt. Pixels remain float32 throughout.
 """
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from time import monotonic
+import os
 import subprocess
 import tempfile
 import re
@@ -161,7 +163,7 @@ def round_stars(rgb, options, workdir, scale, cache=None, canceled=lambda: False
 
 
 def gaussian_halo(source, sigma, canceled=lambda: False):
-    """Same finite reflected Gaussian as ndimage, with bounded FFT batches."""
+    """Same finite reflected Gaussian, with bounded independent CPU batches."""
     check_cancel(canceled)
     if sigma <= 1e-15:
         return source.copy()
@@ -172,26 +174,41 @@ def gaussian_halo(source, sigma, canceled=lambda: False):
         kernel = (kernel/kernel.sum()).astype(np.float32)
     result = source
     output = np.empty_like(source)
-    # Match ndimage's axis order and float32 intermediate storage. Symmetric
-    # padding repeats the edge pixel, i.e. ndimage's half-sample reflect mode.
-    for axis in (0, 1):
-        other = 1-axis
-        if sigma >= 32:
-            padding = [(0, 0)]*3
-            padding[axis] = (radius, radius)
-            shape = [1]*3
-            shape[axis] = len(kernel)
-        for start in range(0, result.shape[other], 128):
-            check_cancel(canceled)
-            block = [slice(None)]*3
-            block[other] = slice(start, start+128)
-            block = tuple(block)
-            if sigma < 32:
-                gaussian_filter1d(result[block], sigma, axis=axis, output=output[block], mode='reflect')
-            else:
-                output[block] = oaconvolve(np.pad(result[block], padding, mode='symmetric'),
-                                          kernel.reshape(shape), mode='valid', axes=(axis,))
-        result = output
+    workers = min(4, os.cpu_count() or 1) if source.shape[0]*source.shape[1] >= 1_000_000 else 1
+    executor = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
+    try:
+        # Keep the axis order and float32 intermediates. Each block owns distinct
+        # rows/columns perpendicular to the filter axis, including in-place pass 2.
+        for axis in (0, 1):
+            other = 1-axis
+            if sigma >= 32:
+                padding = [(0, 0)]*3
+                padding[axis] = (radius, radius)
+                shape = [1]*3
+                shape[axis] = len(kernel)
+            def filter_block(start):
+                check_cancel(canceled)
+                block = [slice(None)]*3
+                block[other] = slice(start, start+128)
+                block = tuple(block)
+                if sigma < 32:
+                    gaussian_filter1d(result[block], sigma, axis=axis, output=output[block], mode='reflect')
+                else:
+                    output[block] = oaconvolve(np.pad(result[block], padding, mode='symmetric'),
+                                              kernel.reshape(shape), mode='valid', axes=(axis,))
+            for start in range(0, result.shape[other], 128*workers):
+                check_cancel(canceled)
+                if executor:
+                    futures = [executor.submit(filter_block, offset)
+                               for offset in range(start, min(start+128*workers, result.shape[other]), 128)]
+                    for future in futures:
+                        future.result()
+                else:
+                    filter_block(start)
+            result = output
+    finally:
+        if executor:
+            executor.shutdown(wait=True, cancel_futures=True)
     check_cancel(canceled)
     return result
 
