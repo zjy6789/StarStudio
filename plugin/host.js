@@ -81,7 +81,8 @@ async function upload(doc, layer, api, report) {
 
 async function write(doc, key, meta, name, api, report, context, existingLayer) {
   const layer = existingLayer || await doc.createLayer({name});
-  const rowsPerBlock = Math.min(512, Math.max(1, Math.floor(8*1024*1024/(meta.width*meta.components*4))));
+  // Fewer native writes, bounded below the bridge's 64 MiB float-block limit.
+  const rowsPerBlock = Math.min(512, Math.max(1, Math.floor(32*1024*1024/(meta.width*meta.components*4))));
   for (let y=0; y<meta.height; y+=rowsPerBlock) {
     if (context.isCancelled) throw new Error('用户取消了操作。');
     const rows = Math.min(rowsPerBlock, meta.height-y);

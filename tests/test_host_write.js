@@ -134,3 +134,42 @@ for(const size of [8,16,32]) for(const profile of ['Display P3','Star Studio Lin
     assert.equal(written,true);assert.equal(disposed,true);
   });
 }
+
+for(const size of [8,16,32]) test(`${size}-bit wide writes preserve full tiles and the final short row within bounded transfers`,async()=>{
+  const width=6000,height=350,components=4,requests=[],writes=[];
+  let top=0,disposed=0;
+  const value=index=>Math.fround(size===32?(index%997)/997-.125:(index%997)/997);
+  const context={module:{exports:{}},Float32Array,Uint8Array,Uint16Array,require:()=>({imaging:{
+    createImageDataFromBuffer:async(raw,options)=>{
+      assert.equal(options.width,width);assert.equal(options.components,components);assert.equal(options.fullRange,true);assert.equal(options.colorProfile,'');
+      assert.equal(raw.length,width*options.height*components);
+      assert.equal(raw.constructor,size===8?Uint8Array:size===16?Uint16Array:Float32Array);
+      for(let i=0;i<raw.length;i++){
+        const expected=size===32?value(top*width*components+i):Math.round(value(top*width*components+i)*(size===8?255:65535));
+        if(raw[i]!==expected)assert.fail('Pixel mismatch at '+(top*width*components+i));
+      }
+      return {dispose(){disposed++;}};
+    },putPixels:async options=>{assert.equal(options.replace,top===0);assert.equal(options.targetBounds.top,top);writes.push(top);}}})};
+  vm.runInNewContext(fs.readFileSync('plugin/host.js','utf8'),context);
+  const api=async path=>{
+    const q=new URL('http://localhost'+path).searchParams;top=Number(q.get('y'));const rows=Number(q.get('rows'));
+    assert.ok(rows>0&&rows<=512&&top+rows<=height);
+    const data=new Float32Array(width*rows*components);
+    assert.ok(data.byteLength<=32*1024*1024);
+    for(let i=0;i<data.length;i++)data[i]=value(top*width*components+i);
+    requests.push({top,rows});return data.buffer;
+  };
+  await context.module.exports.write({id:1},'pixels',{width,height,components,size,colorSpace:'RGB'},'pixels',api,()=>{},{isCancelled:false},{id:2});
+  assert.deepEqual(requests,[{top:0,rows:349},{top:349,rows:1}]);
+  assert.deepEqual(writes,[0,349]);assert.equal(disposed,2);
+});
+
+test('canceling a wide write after its first native tile disposes it and requests no later tiles',async()=>{
+  const width=6000,height=700,contextState={isCancelled:false};let requests=0,writes=0,disposed=0;
+  const context={module:{exports:{}},Float32Array,Uint8Array,Uint16Array,require:()=>({imaging:{
+    createImageDataFromBuffer:async()=>({dispose(){disposed++;}}),putPixels:async()=>{writes++;contextState.isCancelled=true;}}})};
+  vm.runInNewContext(fs.readFileSync('plugin/host.js','utf8'),context);
+  const api=async path=>{requests++;const rows=Number(new URL('http://localhost'+path).searchParams.get('rows'));return new Float32Array(width*rows*4).buffer;};
+  await assert.rejects(context.module.exports.write({id:1},'pixels',{width,height,components:4,size:16,colorSpace:'RGB'},'pixels',api,()=>{},contextState,{id:2}),/取消/);
+  assert.equal(requests,1);assert.equal(writes,1);assert.equal(disposed,1);
+});
